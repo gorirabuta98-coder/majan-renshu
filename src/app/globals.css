@@ -81,7 +81,7 @@ body {
   body { padding-bottom: env(safe-area-inset-bottom); }
   .table-surface.sticky { background: rgba(255, 253, 245, 0.98); box-shadow: 0 -8px 18px rgba(146, 92, 20, 0.12); }
   .table-surface.fixed { padding: 0.55rem 0.6rem calc(0.55rem + env(safe-area-inset-bottom)); }
-  .hand-row { gap: 0.05rem; flex-wrap: nowrap; }
-  .hand-row .tile-card { width: clamp(1.35rem, 8vw, 1.85rem); font-size: clamp(0.62rem, 3.3vw, 0.78rem); }
+  .hand-row-mobile { gap: 0.125rem; flex-wrap: nowrap; }
+  .hand-row-mobile .hand-tile { width: auto; min-width: 0; max-width: none; flex: 1 1 0; padding: 0.125rem; font-size: clamp(0.55rem, 3vw, 0.72rem); }
   .mode-button, .secondary-button, .force-reset-button { padding: 0.45rem 0.55rem; font-size: 0.7rem; }
 }
