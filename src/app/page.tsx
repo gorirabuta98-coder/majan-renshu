@@ -58,6 +58,22 @@ function sortHand(hand: Tile[]) {
   return [...hand].sort((left, right) => suitOrder[left.suit] - suitOrder[right.suit] || left.value - right.value);
 }
 
+function getBestDiscardIndex(hand: Tile[]) {
+  const tileCount = (tile: Tile) => hand.filter((candidate) => candidate.suit === tile.suit && candidate.value === tile.value).length;
+  const connectedCount = (tile: Tile) => tile.suit === "honor" ? 0 : hand.filter((candidate) => candidate.suit === tile.suit && candidate.value !== tile.value && Math.abs(candidate.value - tile.value) <= 2).length;
+  const discardScore = (tile: Tile) => {
+    const count = tileCount(tile);
+    const connected = connectedCount(tile);
+    if (count > 1) return -100 + count;
+    if (tile.suit === "honor") return tile.value <= 4 ? 600 : 500;
+    if (connected > 0) return -200 - connected;
+    if (tile.value === 1 || tile.value === 9) return 400;
+    if (tile.value === 2 || tile.value === 8) return 300;
+    return 200;
+  };
+  return hand.reduce((bestIndex, tile, index) => discardScore(tile) > discardScore(hand[bestIndex]) ? index : bestIndex, 0);
+}
+
 function tileClass(tile: Tile) {
   if (tile.suit === "man") return "text-red-600";
   if (tile.suit === "pin") return "text-blue-600";
@@ -127,9 +143,10 @@ export default function Home() {
           const wall = current.wall.slice(1);
           const drawnTile = current.wall[0];
           if (drawnTile) hands[cpu] = [...(hands[cpu] ?? []), drawnTile];
-          const discarded = hands[cpu]?.[hands[cpu].length - 1];
+          const discardIndex = hands[cpu].length > 0 ? getBestDiscardIndex(hands[cpu]) : -1;
+          const discarded = discardIndex >= 0 ? hands[cpu][discardIndex] : undefined;
           if (discarded) {
-            hands[cpu] = hands[cpu].slice(0, -1);
+            hands[cpu] = sortHand([...hands[cpu].slice(0, discardIndex), ...hands[cpu].slice(discardIndex + 1)]);
             rivers[cpu] = [...(rivers[cpu] ?? []), discarded];
           }
           const next = { ...current, hands, rivers, wall, turn: cpu, lastAction: `${PLAYER_NAMES[cpu]}がツモ切り` };
