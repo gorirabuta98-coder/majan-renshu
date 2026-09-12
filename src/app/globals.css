@@ -73,10 +73,15 @@ body {
 }
 
 @media (max-width: 767px) {
+  .mobile-compact-header { padding-top: 0.35rem; padding-bottom: 0.35rem; }
+  .mobile-compact-header p:first-child, .mobile-compact-header h1 { display: none; }
+  .mobile-compact-header > div { min-height: 0; }
+  .mobile-compact-header .text-right { margin-left: auto; }
+  .mobile-hide-copy { display: none; }
   body { padding-bottom: env(safe-area-inset-bottom); }
   .table-surface.sticky { background: rgba(255, 253, 245, 0.98); box-shadow: 0 -8px 18px rgba(146, 92, 20, 0.12); }
   .table-surface.fixed { padding: 0.55rem 0.6rem calc(0.55rem + env(safe-area-inset-bottom)); }
-  .hand-row { gap: 0; }
-  .hand-row .tile-card { width: 1.15rem; font-size: 0.58rem; }
+  .hand-row { gap: 0.05rem; flex-wrap: nowrap; }
+  .hand-row .tile-card { width: clamp(1.35rem, 8vw, 1.85rem); font-size: clamp(0.62rem, 3.3vw, 0.78rem); }
   .mode-button, .secondary-button, .force-reset-button { padding: 0.45rem 0.55rem; font-size: 0.7rem; }
 }
