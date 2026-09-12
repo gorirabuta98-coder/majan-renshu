@@ -16,10 +16,10 @@ const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const supabase = supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null;
 
 function createDeck() {
-  const deck: Tile[] = [];
+  let deck: Tile[] = [];
   const labels = ["一", "二", "三", "四", "五", "六", "七", "八", "九"];
-  for (const suit of ["man", "pin", "sou"] as Suit[]) for (let value = 1; value <= 9; value += 1) for (let copy = 0; copy < 4; copy += 1) deck.push({ id: `${suit}-${value}-${copy}`, suit, value, label: `${labels[value - 1]}${suit === "man" ? "萬" : suit === "pin" ? "筒" : "索"}` });
-  ["東", "南", "西", "北", "白", "發", "中"].forEach((label, index) => { for (let copy = 0; copy < 4; copy += 1) deck.push({ id: `honor-${index}-${copy}`, suit: "honor", value: index + 1, label }); });
+  for (const suit of ["man", "pin", "sou"] as Suit[]) for (let value = 1; value <= 9; value += 1) for (let copy = 0; copy < 4; copy += 1) deck = [...deck, { id: `${suit}-${value}-${copy}`, suit, value, label: `${labels[value - 1]}${suit === "man" ? "萬" : suit === "pin" ? "筒" : "索"}` }];
+  ["東", "南", "西", "北", "白", "發", "中"].forEach((label, index) => { for (let copy = 0; copy < 4; copy += 1) deck = [...deck, { id: `honor-${index}-${copy}`, suit: "honor", value: index + 1, label }]; });
   return deck.sort(() => Math.random() - 0.5);
 }
 
@@ -27,10 +27,30 @@ function newBoard(hostId: string | null = null): BoardState {
   const deck = createDeck();
   const doraIndicator = deck.splice(Math.floor(Math.random() * deck.length), 1)[0];
   const hands = [[], [], [], []] as Tile[][];
-  for (let round = 0; round < 13; round += 1) for (const hand of hands) hand.push(deck.pop() as Tile);
-  hands[0].push(deck.pop() as Tile);
+  for (let round = 0; round < 13; round += 1) for (let index = 0; index < hands.length; index += 1) {
+    const tile = deck.pop();
+    if (tile) hands[index] = [...hands[index], tile];
+  }
+  const firstDraw = deck.pop();
+  if (firstDraw) hands[0] = [...hands[0], firstDraw];
   hands[0] = sortHand(hands[0]);
   return { hands, rivers: [[], [], [], []], wall: deck, doraIndicator, turn: 0, phase: "player", gameMode: hostId ? "PLAYING" : "READY", hostId, lastAction: "東家の配牌が完了しました" };
+}
+
+function normalizeBoard(payload: Partial<BoardState>): BoardState {
+  const hands = Array.from({ length: 4 }, (_, index) => Array.isArray(payload.hands?.[index]) ? payload.hands[index] : []);
+  const rivers = Array.from({ length: 4 }, (_, index) => Array.isArray(payload.rivers?.[index]) ? payload.rivers[index] : []);
+  return {
+    hands,
+    rivers,
+    wall: Array.isArray(payload.wall) ? payload.wall : [],
+    doraIndicator: payload.doraIndicator ?? { id: "fallback-dora", suit: "honor", value: 5, label: "白" },
+    turn: typeof payload.turn === "number" ? payload.turn : 0,
+    phase: payload.phase === "cpu" ? "cpu" : "player",
+    gameMode: payload.gameMode === "PLAYING" ? "PLAYING" : "READY",
+    hostId: typeof payload.hostId === "string" ? payload.hostId : null,
+    lastAction: typeof payload.lastAction === "string" ? payload.lastAction : "盤面を同期しました",
+  };
 }
 
 function sortHand(hand: Tile[]) {
@@ -80,7 +100,7 @@ export default function Home() {
     const channel = supabase.channel(ROOM);
     channelRef.current = channel;
     channel.on("broadcast", { event: "board" }, ({ payload }) => {
-      const nextBoard = payload as BoardState;
+      const nextBoard = normalizeBoard(payload as Partial<BoardState>);
       setBoard(nextBoard);
       setIsHost(nextBoard.hostId === clientIdRef.current);
     });
@@ -103,9 +123,13 @@ export default function Home() {
           const hands = current.hands.map((hand) => [...hand]);
           const rivers = current.rivers.map((river) => [...river]);
           const wall = current.wall.slice(1);
-          if (current.wall[0]) hands[cpu].push(current.wall[0]);
-          const discarded = hands[cpu].pop();
-          if (discarded) rivers[cpu].push(discarded);
+          const drawnTile = current.wall[0];
+          if (drawnTile) hands[cpu] = [...(hands[cpu] ?? []), drawnTile];
+          const discarded = hands[cpu]?.[hands[cpu].length - 1];
+          if (discarded) {
+            hands[cpu] = hands[cpu].slice(0, -1);
+            rivers[cpu] = [...(rivers[cpu] ?? []), discarded];
+          }
           const next = { ...current, hands, rivers, wall, turn: cpu, lastAction: `${PLAYER_NAMES[cpu]}がツモ切り` };
           broadcast(next);
           return next;
@@ -145,7 +169,7 @@ export default function Home() {
       const discarded = hands[0].splice(index, 1)[0];
       if (!discarded) return current;
       hands[0] = sortHand(hands[0]);
-      rivers[0].push(discarded);
+      rivers[0] = [...(rivers[0] ?? []), discarded];
       const next = { ...current, hands, rivers, turn: 1, phase: "cpu" as const, lastAction: `あなたが${discarded.label}を打牌` };
       broadcast(next);
       return next;
