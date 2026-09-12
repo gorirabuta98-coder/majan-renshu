@@ -6,7 +6,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 type Suit = "man" | "pin" | "sou" | "honor";
 type Tile = { id: string; suit: Suit; value: number; label: string };
 type Role = "player" | "coach";
-type BoardState = { hands: Tile[][]; rivers: Tile[][]; wall: Tile[]; doraIndicator: Tile; turn: number; phase: "player" | "cpu"; lastAction: string };
+type BoardState = { hands: Tile[][]; rivers: Tile[][]; wall: Tile[]; doraIndicator: Tile; turn: number; phase: "player" | "cpu"; gameMode: "READY" | "PLAYING"; hostId: string | null; lastAction: string };
 type ChatMessage = { id: string; role: Role; text: string; time: string };
 
 const ROOM = "mahjong-coaching-main";
@@ -23,14 +23,14 @@ function createDeck() {
   return deck.sort(() => Math.random() - 0.5);
 }
 
-function newBoard(): BoardState {
+function newBoard(hostId: string | null = null): BoardState {
   const deck = createDeck();
   const doraIndicator = deck.splice(Math.floor(Math.random() * deck.length), 1)[0];
   const hands = [[], [], [], []] as Tile[][];
   for (let round = 0; round < 13; round += 1) for (const hand of hands) hand.push(deck.pop() as Tile);
   hands[0].push(deck.pop() as Tile);
   hands[0] = sortHand(hands[0]);
-  return { hands, rivers: [[], [], [], []], wall: deck, doraIndicator, turn: 0, phase: "player", lastAction: "東家の配牌が完了しました" };
+  return { hands, rivers: [[], [], [], []], wall: deck, doraIndicator, turn: 0, phase: "player", gameMode: hostId ? "PLAYING" : "READY", hostId, lastAction: "東家の配牌が完了しました" };
 }
 
 function sortHand(hand: Tile[]) {
@@ -59,12 +59,17 @@ export default function Home() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [chatText, setChatText] = useState("");
   const [connection, setConnection] = useState(supabase ? "接続準備中" : "ローカル対局");
+  const [isHost, setIsHost] = useState(!supabase);
+  const [isProcessingCpu, setIsProcessingCpu] = useState(false);
   const channelRef = useRef<RealtimeChannel | null>(null);
   const roleRef = useRef(role);
   const boardRef = useRef<BoardState | null>(null);
+  const isProcessingCpuRef = useRef(false);
+  const clientIdRef = useRef("");
+  const cpuTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // eslint-disable-next-line react-hooks/set-state-in-effect
-  useEffect(() => { setIsMounted(true); setBoard(newBoard()); }, []);
+  useEffect(() => { clientIdRef.current = crypto.randomUUID(); setIsMounted(true); setBoard(newBoard(supabase ? null : "local-host")); }, []);
   useEffect(() => { roleRef.current = role; }, [role]);
   useEffect(() => { boardRef.current = board; }, [board]);
 
@@ -74,7 +79,11 @@ export default function Home() {
     if (!isMounted || !supabase) return;
     const channel = supabase.channel(ROOM);
     channelRef.current = channel;
-    channel.on("broadcast", { event: "board" }, ({ payload }) => setBoard(payload as BoardState));
+    channel.on("broadcast", { event: "board" }, ({ payload }) => {
+      const nextBoard = payload as BoardState;
+      setBoard(nextBoard);
+      setIsHost(nextBoard.hostId === clientIdRef.current);
+    });
     channel.on("broadcast", { event: "request-board" }, () => { void channel.send({ type: "broadcast", event: "board", payload: boardRef.current }); });
     channel.on("broadcast", { event: "chat" }, ({ payload }) => setMessages((current) => [...current.slice(-29), payload as ChatMessage]));
     void channel.subscribe((status) => { setConnection(status === "SUBSCRIBED" ? "Realtime 接続中" : `接続: ${status}`); if (status === "SUBSCRIBED") void channel.send({ type: "broadcast", event: "request-board", payload: {} }); });
@@ -82,12 +91,13 @@ export default function Home() {
   }, [isMounted]);
 
   useEffect(() => {
-    if (boardRef.current?.phase !== "cpu") return;
+    if (!isHost || role !== "player" || boardRef.current?.gameMode !== "PLAYING" || boardRef.current.phase !== "cpu" || isProcessingCpuRef.current) return;
+    isProcessingCpuRef.current = true;
+    setIsProcessingCpu(true);
     let cancelled = false;
-    const runCpuTurns = async () => {
-      for (let cpu = 1; cpu <= 3; cpu += 1) {
-        await new Promise((resolve) => setTimeout(resolve, 300));
-        if (cancelled) return;
+    let cpu = 1;
+    const runCpuTurn = () => {
+      if (!isHost || isProcessingCpuRef.current === false || cancelled || boardRef.current?.gameMode !== "PLAYING") return;
         setBoard((current) => {
           if (!current) return current;
           const hands = current.hands.map((hand) => [...hand]);
@@ -100,6 +110,10 @@ export default function Home() {
           broadcast(next);
           return next;
         });
+      cpu += 1;
+      if (cpu <= 3) {
+        cpuTimerRef.current = setTimeout(runCpuTurn, 300);
+        return;
       }
       if (!cancelled) setBoard((current) => {
         if (!current) return current;
@@ -109,13 +123,21 @@ export default function Home() {
         broadcast(next);
         return next;
       });
+      isProcessingCpuRef.current = false;
+      setIsProcessingCpu(false);
     };
-    void runCpuTurns();
-    return () => { cancelled = true; };
-  }, [board?.phase, broadcast]);
+    cpuTimerRef.current = setTimeout(runCpuTurn, 300);
+    return () => {
+      cancelled = true;
+      if (cpuTimerRef.current) clearTimeout(cpuTimerRef.current);
+      cpuTimerRef.current = null;
+      isProcessingCpuRef.current = false;
+      setIsProcessingCpu(false);
+    };
+  }, [board?.phase, broadcast, isHost, role]);
 
   const discard = (index: number) => {
-    if (!board || roleRef.current !== "player" || board.phase !== "player" || board.turn !== 0) return;
+    if (!board || !isHost || roleRef.current !== "player" || board.gameMode !== "PLAYING" || board.phase !== "player" || board.turn !== 0 || isProcessingCpuRef.current) return;
     setBoard((current) => {
       if (!current) return current;
       const hands = current.hands.map((hand) => [...hand]);
@@ -130,7 +152,13 @@ export default function Home() {
     });
   };
 
-  const reset = () => { const next = newBoard(); setBoard(next); broadcast(next); };
+  const reset = () => {
+    if (supabase && board?.gameMode === "PLAYING" && !isHost) return;
+    const next = newBoard(clientIdRef.current || "local-host");
+    setIsHost(true);
+    setBoard(next);
+    broadcast(next);
+  };
   const sendChat = (event: React.FormEvent) => {
     event.preventDefault();
     const text = chatText.trim();
@@ -148,7 +176,7 @@ export default function Home() {
       <header className="border-b border-amber-200 bg-white/75 px-4 py-4 shadow-sm backdrop-blur sm:px-8"><div className="mx-auto flex max-w-7xl items-center justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-[0.2em] text-amber-700">MAHJONG COACHING ROOM</p><h1 className="mt-1 text-2xl font-black tracking-tight sm:text-3xl">東一局 / 指導対局</h1></div><div className="text-right"><p className="text-xs text-slate-500">{connection}</p><p className="mt-1 text-sm font-bold text-amber-800">残り {board.wall.length} 枚</p></div></div></header>
       <div className="flex w-full max-w-[1400px] mx-auto flex-col gap-4 px-4 py-6 sm:px-8">
         <div className="flex w-full flex-row items-start gap-4">
-        <section className="min-w-0 w-full flex-1 space-y-5"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-sm font-bold text-amber-700">{board.lastAction}</p><p className="text-xs text-slate-500">{board.phase === "player" ? "手牌から捨てる牌を選択" : "CPUが順番にツモ切り中..."}</p></div><div className="flex gap-2"><button type="button" onClick={() => setRole("player")} className={`mode-button ${role === "player" ? "active" : ""}`}>打者</button><button type="button" onClick={() => setRole("coach")} className={`mode-button ${role === "coach" ? "active" : ""}`}>指導者</button><button type="button" onClick={reset} className="secondary-button">新しい局</button></div></div>
+        <section className="min-w-0 w-full flex-1 space-y-5"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-sm font-bold text-amber-700">{board.lastAction}</p><p className="text-xs text-slate-500">{board.gameMode === "READY" ? "対局開始を押してホストになります" : board.phase === "player" ? "手牌から捨てる牌を選択" : isProcessingCpu ? "CPUが順番にツモ切り中..." : "CPU処理を同期中..."}</p></div><div className="flex gap-2"><button type="button" onClick={() => setRole("player")} className={`mode-button ${role === "player" ? "active" : ""}`}>打者</button><button type="button" onClick={() => setRole("coach")} className={`mode-button ${role === "coach" ? "active" : ""}`}>指導者</button><button type="button" onClick={reset} className="secondary-button">{board.gameMode === "READY" ? "対局開始" : "新しい局"}</button></div></div>
           <div className="table-surface"><div className="space-y-4"><div className="flex items-center justify-between"><h2 className="section-title">河</h2><span className="text-xs text-slate-500">各6枚で折り返し</span></div><div className="river-grid">{board.rivers.map((river, playerIndex) => <div key={playerIndex} className="river-row"><span className="w-10 shrink-0 text-xs font-bold text-slate-500">{PLAYER_NAMES[playerIndex]}</span><div className="river-tiles">{river.map((tile) => <TileCard key={tile.id} tile={tile} disabled />)}</div></div>)}</div></div><div className="wall-line"><span>山</span><div className="h-2 flex-1 rounded-full bg-amber-300/70"><div className="h-full rounded-full bg-amber-600 transition-all" style={{ width: `${(board.wall.length / 82) * 100}%` }} /></div><span className="ml-2 whitespace-nowrap">ドラ</span><TileCard tile={board.doraIndicator} disabled /></div></div>
         </section>
         <aside className="chat-panel sticky top-4 h-[430px] w-80 shrink-0"><div className="flex items-center justify-between border-b border-amber-200 pb-4"><div><h2 className="section-title">指導チャット</h2><p className="text-xs text-slate-500">全端末にリアルタイム同期</p></div><span className="live-dot">LIVE</span></div><div className="chat-list max-h-[250px] overflow-y-auto">{messages.length === 0 ? <p className="py-8 text-center text-sm text-slate-400">牌譜を見ながら会話できます</p> : messages.map((message) => <div key={message.id} className={`chat-bubble ${message.role === role ? "mine" : ""}`}><div className="flex justify-between gap-2 text-[11px] font-bold text-slate-500"><span>{message.role === "coach" ? "指導者" : "打者"}</span><time>{message.time}</time></div><p className="mt-1 text-sm">{message.text}</p></div>)}</div><form onSubmit={sendChat} className="mt-auto flex gap-2 border-t border-amber-200 pt-4"><input value={chatText} onChange={(event) => setChatText(event.target.value)} placeholder="メッセージを入力" className="chat-input" /><button type="submit" className="send-button" aria-label="送信">送信</button></form></aside>
