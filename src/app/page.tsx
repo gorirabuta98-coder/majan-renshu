@@ -1,69 +1,160 @@
-import Image from "next/image";
+"use client";
+
+import { createClient, type RealtimeChannel } from "@supabase/supabase-js";
+import { useCallback, useEffect, useRef, useState } from "react";
+
+type Suit = "man" | "pin" | "sou" | "honor";
+type Tile = { id: string; suit: Suit; value: number; label: string };
+type Role = "player" | "coach";
+type BoardState = { hands: Tile[][]; rivers: Tile[][]; wall: Tile[]; doraIndicator: Tile; turn: number; phase: "player" | "cpu"; lastAction: string };
+type ChatMessage = { id: string; role: Role; text: string; time: string };
+
+const ROOM = "mahjong-coaching-main";
+const PLAYER_NAMES = ["自分", "下家", "対面", "上家"];
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+const supabase = supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null;
+
+function createDeck() {
+  const deck: Tile[] = [];
+  const labels = ["一", "二", "三", "四", "五", "六", "七", "八", "九"];
+  for (const suit of ["man", "pin", "sou"] as Suit[]) for (let value = 1; value <= 9; value += 1) for (let copy = 0; copy < 4; copy += 1) deck.push({ id: `${suit}-${value}-${copy}`, suit, value, label: `${labels[value - 1]}${suit === "man" ? "萬" : suit === "pin" ? "筒" : "索"}` });
+  ["東", "南", "西", "北", "白", "發", "中"].forEach((label, index) => { for (let copy = 0; copy < 4; copy += 1) deck.push({ id: `honor-${index}-${copy}`, suit: "honor", value: index + 1, label }); });
+  return deck.sort(() => Math.random() - 0.5);
+}
+
+function newBoard(): BoardState {
+  const deck = createDeck();
+  const doraIndicator = deck.splice(Math.floor(Math.random() * deck.length), 1)[0];
+  const hands = [[], [], [], []] as Tile[][];
+  for (let round = 0; round < 13; round += 1) for (const hand of hands) hand.push(deck.pop() as Tile);
+  hands[0].push(deck.pop() as Tile);
+  hands[0] = sortHand(hands[0]);
+  return { hands, rivers: [[], [], [], []], wall: deck, doraIndicator, turn: 0, phase: "player", lastAction: "東家の配牌が完了しました" };
+}
+
+function sortHand(hand: Tile[]) {
+  const suitOrder: Record<Suit, number> = { man: 0, pin: 1, sou: 2, honor: 3 };
+  return [...hand].sort((left, right) => suitOrder[left.suit] - suitOrder[right.suit] || left.value - right.value);
+}
+
+function tileClass(tile: Tile) {
+  if (tile.suit === "man") return "text-red-600";
+  if (tile.suit === "pin") return "text-blue-600";
+  if (tile.suit === "sou" || tile.label === "發") return "text-emerald-600";
+  if (tile.label === "中") return "text-red-600";
+  return "text-slate-900";
+}
+
+function TileCard({ tile, onClick, disabled, className = "" }: { tile: Tile; onClick?: () => void; disabled?: boolean; className?: string }) {
+  return <button type="button" disabled={disabled} onClick={onClick} className={`tile-card ${tileClass(tile)} ${className} ${disabled ? "cursor-default" : "hover:-translate-y-1 hover:shadow-md"}`} aria-label={tile.label}>{tile.label}</button>;
+}
+
+function formatTime() { return new Date().toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" }); }
 
 export default function Home() {
+  const [isMounted, setIsMounted] = useState(false);
+  const [board, setBoard] = useState<BoardState | null>(null);
+  const [role, setRole] = useState<Role>("player");
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [chatText, setChatText] = useState("");
+  const [connection, setConnection] = useState(supabase ? "接続準備中" : "ローカル対局");
+  const channelRef = useRef<RealtimeChannel | null>(null);
+  const roleRef = useRef(role);
+  const boardRef = useRef<BoardState | null>(null);
+
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { setIsMounted(true); setBoard(newBoard()); }, []);
+  useEffect(() => { roleRef.current = role; }, [role]);
+  useEffect(() => { boardRef.current = board; }, [board]);
+
+  const broadcast = useCallback((next: BoardState) => { void channelRef.current?.send({ type: "broadcast", event: "board", payload: next }); }, []);
+
+  useEffect(() => {
+    if (!isMounted || !supabase) return;
+    const channel = supabase.channel(ROOM);
+    channelRef.current = channel;
+    channel.on("broadcast", { event: "board" }, ({ payload }) => setBoard(payload as BoardState));
+    channel.on("broadcast", { event: "request-board" }, () => { void channel.send({ type: "broadcast", event: "board", payload: boardRef.current }); });
+    channel.on("broadcast", { event: "chat" }, ({ payload }) => setMessages((current) => [...current.slice(-29), payload as ChatMessage]));
+    void channel.subscribe((status) => { setConnection(status === "SUBSCRIBED" ? "Realtime 接続中" : `接続: ${status}`); if (status === "SUBSCRIBED") void channel.send({ type: "broadcast", event: "request-board", payload: {} }); });
+    return () => { void supabase.removeChannel(channel); channelRef.current = null; };
+  }, [isMounted]);
+
+  useEffect(() => {
+    if (boardRef.current?.phase !== "cpu") return;
+    let cancelled = false;
+    const runCpuTurns = async () => {
+      for (let cpu = 1; cpu <= 3; cpu += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        if (cancelled) return;
+        setBoard((current) => {
+          if (!current) return current;
+          const hands = current.hands.map((hand) => [...hand]);
+          const rivers = current.rivers.map((river) => [...river]);
+          const wall = current.wall.slice(1);
+          if (current.wall[0]) hands[cpu].push(current.wall[0]);
+          const discarded = hands[cpu].pop();
+          if (discarded) rivers[cpu].push(discarded);
+          const next = { ...current, hands, rivers, wall, turn: cpu, lastAction: `${PLAYER_NAMES[cpu]}がツモ切り` };
+          broadcast(next);
+          return next;
+        });
+      }
+      if (!cancelled) setBoard((current) => {
+        if (!current) return current;
+        const drawnTile = current.wall[0];
+        const hands = current.hands.map((currentHand, index) => index === 0 && drawnTile ? [...currentHand, drawnTile] : [...currentHand]);
+        const next = { ...current, hands, wall: current.wall.slice(1), phase: "player" as const, turn: 0, lastAction: "あなたのツモ番です" };
+        broadcast(next);
+        return next;
+      });
+    };
+    void runCpuTurns();
+    return () => { cancelled = true; };
+  }, [board?.phase, broadcast]);
+
+  const discard = (index: number) => {
+    if (!board || roleRef.current !== "player" || board.phase !== "player" || board.turn !== 0) return;
+    setBoard((current) => {
+      if (!current) return current;
+      const hands = current.hands.map((hand) => [...hand]);
+      const rivers = current.rivers.map((river) => [...river]);
+      const discarded = hands[0].splice(index, 1)[0];
+      if (!discarded) return current;
+      hands[0] = sortHand(hands[0]);
+      rivers[0].push(discarded);
+      const next = { ...current, hands, rivers, turn: 1, phase: "cpu" as const, lastAction: `あなたが${discarded.label}を打牌` };
+      broadcast(next);
+      return next;
+    });
+  };
+
+  const reset = () => { const next = newBoard(); setBoard(next); broadcast(next); };
+  const sendChat = (event: React.FormEvent) => {
+    event.preventDefault();
+    const text = chatText.trim();
+    if (!text) return;
+    const message = { id: crypto.randomUUID(), role, text, time: formatTime() };
+    setMessages((current) => [...current.slice(-29), message]);
+    void channelRef.current?.send({ type: "broadcast", event: "chat", payload: message });
+    setChatText("");
+  };
+
+  if (!isMounted || !board) return <main className="flex min-h-screen items-center justify-center bg-amber-50 text-sm font-bold text-amber-800">対局を準備しています...</main>;
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <main className="min-h-screen bg-amber-50 text-slate-900">
+      <header className="border-b border-amber-200 bg-white/75 px-4 py-4 shadow-sm backdrop-blur sm:px-8"><div className="mx-auto flex max-w-7xl items-center justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-[0.2em] text-amber-700">MAHJONG COACHING ROOM</p><h1 className="mt-1 text-2xl font-black tracking-tight sm:text-3xl">東一局 / 指導対局</h1></div><div className="text-right"><p className="text-xs text-slate-500">{connection}</p><p className="mt-1 text-sm font-bold text-amber-800">残り {board.wall.length} 枚</p></div></div></header>
+      <div className="flex w-full max-w-[1400px] mx-auto flex-col gap-4 px-4 py-6 sm:px-8">
+        <div className="flex w-full flex-row items-start gap-4">
+        <section className="min-w-0 w-full flex-1 space-y-5"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-sm font-bold text-amber-700">{board.lastAction}</p><p className="text-xs text-slate-500">{board.phase === "player" ? "手牌から捨てる牌を選択" : "CPUが順番にツモ切り中..."}</p></div><div className="flex gap-2"><button type="button" onClick={() => setRole("player")} className={`mode-button ${role === "player" ? "active" : ""}`}>打者</button><button type="button" onClick={() => setRole("coach")} className={`mode-button ${role === "coach" ? "active" : ""}`}>指導者</button><button type="button" onClick={reset} className="secondary-button">新しい局</button></div></div>
+          <div className="table-surface"><div className="space-y-4"><div className="flex items-center justify-between"><h2 className="section-title">河</h2><span className="text-xs text-slate-500">各6枚で折り返し</span></div><div className="river-grid">{board.rivers.map((river, playerIndex) => <div key={playerIndex} className="river-row"><span className="w-10 shrink-0 text-xs font-bold text-slate-500">{PLAYER_NAMES[playerIndex]}</span><div className="river-tiles">{river.map((tile) => <TileCard key={tile.id} tile={tile} disabled />)}</div></div>)}</div></div><div className="wall-line"><span>山</span><div className="h-2 flex-1 rounded-full bg-amber-300/70"><div className="h-full rounded-full bg-amber-600 transition-all" style={{ width: `${(board.wall.length / 82) * 100}%` }} /></div><span className="ml-2 whitespace-nowrap">ドラ</span><TileCard tile={board.doraIndicator} disabled /></div></div>
+        </section>
+        <aside className="chat-panel sticky top-4 h-[430px] w-80 shrink-0"><div className="flex items-center justify-between border-b border-amber-200 pb-4"><div><h2 className="section-title">指導チャット</h2><p className="text-xs text-slate-500">全端末にリアルタイム同期</p></div><span className="live-dot">LIVE</span></div><div className="chat-list max-h-[250px] overflow-y-auto">{messages.length === 0 ? <p className="py-8 text-center text-sm text-slate-400">牌譜を見ながら会話できます</p> : messages.map((message) => <div key={message.id} className={`chat-bubble ${message.role === role ? "mine" : ""}`}><div className="flex justify-between gap-2 text-[11px] font-bold text-slate-500"><span>{message.role === "coach" ? "指導者" : "打者"}</span><time>{message.time}</time></div><p className="mt-1 text-sm">{message.text}</p></div>)}</div><form onSubmit={sendChat} className="mt-auto flex gap-2 border-t border-amber-200 pt-4"><input value={chatText} onChange={(event) => setChatText(event.target.value)} placeholder="メッセージを入力" className="chat-input" /><button type="submit" className="send-button" aria-label="送信">送信</button></form></aside>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
+        <div className="table-surface w-full"><div className="flex items-center justify-between"><div><h2 className="section-title">あなたの手牌</h2><p className="text-xs text-slate-500">東家 / {board.hands[0].length}枚</p></div><span className={`turn-pill ${board.phase === "player" && role === "player" ? "turn-pill-active" : ""}`}>{role === "coach" ? "観戦中" : board.phase === "player" ? "あなたの番" : "CPU進行"}</span></div><div className="hand-row justify-center">{board.hands[0].map((tile, index) => <TileCard key={tile.id} tile={tile} onClick={() => discard(index)} disabled={role !== "player" || board.phase !== "player"} className={board.hands[0].length === 14 && index === 13 ? "ml-3" : ""} />)}</div></div>
+      </div>
+    </main>
   );
 }
