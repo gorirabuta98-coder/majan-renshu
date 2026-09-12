@@ -6,7 +6,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 type Suit = "man" | "pin" | "sou" | "honor";
 type Tile = { id: string; suit: Suit; value: number; label: string };
 type Role = "player" | "coach";
-type BoardState = { hands: Tile[][]; rivers: Tile[][]; wall: Tile[]; doraIndicator: Tile; turn: number; phase: "player" | "cpu"; gameMode: "READY" | "PLAYING"; hostId: string | null; lastAction: string };
+type BoardState = { hands: Tile[][]; discards: Tile[][]; wall: Tile[]; doraIndicator: Tile; turn: number; phase: "player" | "cpu"; gameMode: "READY" | "PLAYING"; hostId: string | null; lastAction: string };
 type ChatMessage = { id: string; role: Role; text: string; time: string };
 
 const ROOM = "mahjong-coaching-main";
@@ -34,15 +34,16 @@ function newBoard(hostId: string | null = null): BoardState {
   const firstDraw = deck.pop();
   if (firstDraw) hands[0] = [...hands[0], firstDraw];
   hands[0] = sortHand(hands[0]);
-  return { hands, rivers: [[], [], [], []], wall: deck, doraIndicator, turn: 0, phase: "player", gameMode: hostId ? "PLAYING" : "READY", hostId, lastAction: "東家の配牌が完了しました" };
+  return { hands, discards: [[], [], [], []], wall: deck, doraIndicator, turn: 0, phase: "player", gameMode: hostId ? "PLAYING" : "READY", hostId, lastAction: "東家の配牌が完了しました" };
 }
 
 function normalizeBoard(payload: Partial<BoardState>): BoardState {
   const hands = Array.from({ length: 4 }, (_, index) => Array.isArray(payload.hands?.[index]) ? payload.hands[index] : []);
-  const rivers = Array.from({ length: 4 }, (_, index) => Array.isArray(payload.rivers?.[index]) ? payload.rivers[index] : []);
+  const payloadDiscards = payload.discards ?? (payload as Partial<BoardState> & { rivers?: Tile[][] }).rivers;
+  const discards = Array.from({ length: 4 }, (_, index) => Array.isArray(payloadDiscards?.[index]) ? payloadDiscards[index] : []);
   return {
     hands,
-    rivers,
+    discards,
     wall: Array.isArray(payload.wall) ? payload.wall : [],
     doraIndicator: payload.doraIndicator ?? { id: "fallback-dora", suit: "honor", value: 5, label: "白" },
     turn: typeof payload.turn === "number" ? payload.turn : 0,
@@ -84,6 +85,10 @@ function tileClass(tile: Tile) {
 
 function TileCard({ tile, onClick, disabled, className = "" }: { tile: Tile; onClick?: () => void; disabled?: boolean; className?: string }) {
   return <button type="button" disabled={disabled} onClick={onClick} className={`tile-card ${tileClass(tile)} ${className} ${disabled ? "cursor-default" : "hover:-translate-y-1 hover:shadow-md"}`} aria-label={tile.label}>{tile.label}</button>;
+}
+
+function RiverRow({ label, tiles }: { label: string; tiles: Tile[] }) {
+  return <div className="river-row grid h-10 grid-cols-[3rem_1fr] items-center gap-2"><span className="text-xs font-bold leading-none text-slate-500">{label}</span><div className="river-tiles flex flex-row flex-nowrap items-center overflow-x-auto">{tiles.map((tile) => <TileCard key={tile.id} tile={tile} disabled />)}</div></div>;
 }
 
 function formatTime() { return new Date().toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" }); }
@@ -141,7 +146,7 @@ export default function Home() {
         setBoard((current) => {
           if (!current) return current;
           const hands = current.hands.map((hand) => [...hand]);
-          const rivers = current.rivers.map((river) => [...river]);
+          const discards = current.discards.map((discardedTiles) => [...discardedTiles]);
           const wall = current.wall.slice(1);
           const drawnTile = current.wall[0];
           if (drawnTile) hands[cpu] = [...(hands[cpu] ?? []), drawnTile];
@@ -149,9 +154,9 @@ export default function Home() {
           const discarded = discardIndex >= 0 ? hands[cpu][discardIndex] : undefined;
           if (discarded) {
             hands[cpu] = sortHand([...hands[cpu].slice(0, discardIndex), ...hands[cpu].slice(discardIndex + 1)]);
-            rivers[cpu] = [...(rivers[cpu] ?? []), discarded];
+            discards[cpu] = [...(discards[cpu] ?? []), discarded];
           }
-          const next = { ...current, hands, rivers, wall, turn: cpu, lastAction: `${PLAYER_NAMES[cpu]}がツモ切り` };
+          const next = { ...current, hands, discards, wall, turn: cpu, lastAction: `${PLAYER_NAMES[cpu]}が打牌` };
           broadcast(next);
           return next;
         });
@@ -186,12 +191,12 @@ export default function Home() {
     setBoard((current) => {
       if (!current) return current;
       const hands = current.hands.map((hand) => [...hand]);
-      const rivers = current.rivers.map((river) => [...river]);
+      const discards = current.discards.map((discardedTiles) => [...discardedTiles]);
       const discarded = hands[0].splice(index, 1)[0];
       if (!discarded) return current;
       hands[0] = sortHand(hands[0]);
-      rivers[0] = [...(rivers[0] ?? []), discarded];
-      const next = { ...current, hands, rivers, turn: 1, phase: "cpu" as const, lastAction: `あなたが${discarded.label}を打牌` };
+      discards[0] = [...(discards[0] ?? []), discarded];
+      const next = { ...current, hands, discards, turn: 1, phase: "cpu" as const, lastAction: `あなたが${discarded.label}を打牌` };
       broadcast(next);
       return next;
     });
@@ -233,7 +238,7 @@ export default function Home() {
       <div className="flex w-full max-w-[1400px] mx-auto flex-col gap-2 px-2 py-3 pb-48 sm:px-8 sm:py-4 md:pb-0">
         <div className="flex w-full flex-col items-stretch gap-2 md:flex-row md:items-start md:gap-4">
         <section className="relative z-10 min-w-0 w-full flex-1 space-y-2 md:space-y-5"><div className="flex flex-wrap items-center justify-between gap-2"><div><p className="mobile-hide-copy text-sm font-bold text-amber-700">{board.lastAction}</p><p className="mobile-hide-copy text-xs text-slate-500">{board.gameMode === "READY" ? "対局開始を押してホストになります" : board.phase === "player" ? "手牌から捨てる牌を選択" : isProcessingCpu ? "CPUが順番にツモ切り中..." : "CPU処理を同期中..."}</p></div><div className="relative z-10 flex flex-wrap gap-1.5"><button type="button" onClick={() => setRole("player")} className={`mode-button ${role === "player" ? "active" : ""}`}>打者</button><button type="button" onClick={() => setRole("coach")} className={`mode-button ${role === "coach" ? "active" : ""}`}>指導者</button><button type="button" onClick={reset} disabled={supabase !== null && board.gameMode === "PLAYING" && !isHost} className="secondary-button">{board.gameMode === "READY" ? "対局開始" : "新しい局"}</button><button type="button" onClick={forceReset} className="force-reset-button">強制リセット</button></div></div>
-          <div className="table-surface"><div className="space-y-4"><div className="flex items-center justify-between"><h2 className="section-title">河</h2></div><div className="river-grid">{board.rivers.map((river, playerIndex) => <div key={playerIndex} className="river-row items-center"><span className="w-10 shrink-0 text-xs font-bold text-slate-500">{PLAYER_NAMES[playerIndex]}</span><div className="river-tiles flex flex-row flex-nowrap items-center overflow-x-auto">{river.map((tile) => <TileCard key={tile.id} tile={tile} disabled />)}</div></div>)}</div></div><div className="wall-line"><span>山</span><div className="h-2 flex-1 rounded-full bg-amber-300/70"><div className="h-full rounded-full bg-amber-600 transition-all" style={{ width: `${(board.wall.length / 82) * 100}%` }} /></div><span className="ml-2 whitespace-nowrap">ドラ</span><TileCard tile={board.doraIndicator} disabled /></div></div>
+          <div className="table-surface"><div className="space-y-4"><div className="flex items-center justify-between"><h2 className="section-title">河</h2></div><div className="river-grid">{PLAYER_NAMES.map((playerName, playerIndex) => <RiverRow key={playerName} label={playerName} tiles={board.discards[playerIndex] ?? []} />)}</div></div><div className="wall-line"><span>山</span><div className="h-2 flex-1 rounded-full bg-amber-300/70"><div className="h-full rounded-full bg-amber-600 transition-all" style={{ width: `${(board.wall.length / 82) * 100}%` }} /></div><span className="ml-2 whitespace-nowrap">ドラ</span><TileCard tile={board.doraIndicator} disabled /></div></div>
         </section>
         <aside className="chat-panel relative z-10 h-[150px] w-full shrink-0 md:sticky md:top-4 md:h-[430px] md:w-80"><div className="flex items-center justify-between border-b border-amber-200 pb-2"><div><h2 className="section-title">指導チャット</h2><p className="text-xs text-slate-500">全端末にリアルタイム同期</p></div><div className="flex items-center gap-2"><button type="button" onClick={() => setIsChatOpen(true)} className="chat-history-button md:hidden">履歴</button><span className="live-dot">LIVE</span></div></div><div className="chat-list hidden max-h-[120px] overflow-y-auto md:flex md:max-h-[250px]">{messages.length === 0 ? <p className="py-4 text-center text-sm text-slate-400">牌譜を見ながら会話できます</p> : messages.map((message) => <div key={message.id} className={`chat-bubble ${message.role === role ? "mine" : ""}`}><div className="flex justify-between gap-2 text-[11px] font-bold text-slate-500"><span>{message.role === "coach" ? "指導者" : "打者"}</span><time>{message.time}</time></div><p className="mt-1 text-sm">{message.text}</p></div>)}</div><form onSubmit={sendChat} className="mt-auto hidden gap-2 border-t border-amber-200 pt-2 md:flex"><input value={chatText} onChange={(event) => setChatText(event.target.value)} placeholder="メッセージを入力" className="chat-input" /><button type="submit" className="send-button" aria-label="送信">送信</button></form></aside>
         </div>
