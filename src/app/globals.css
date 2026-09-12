@@ -33,10 +33,10 @@ body {
 }
 
 .table-surface { padding: 1.25rem; }
-.chat-panel { display: flex; min-height: 520px; flex-direction: column; padding: 1.25rem; }
+.chat-panel { display: flex; min-height: 0; flex-direction: column; padding: 1.25rem; }
 .section-title { font-size: 1rem; font-weight: 800; letter-spacing: 0.02em; }
 .tile-card { width: clamp(1.55rem, 5vw, 2.35rem); aspect-ratio: 0.72; flex: 0 0 auto; border: 2px solid #f0c96b; border-radius: 5px; background: #fffbeb; box-shadow: 0 2px 4px rgba(146, 92, 20, 0.16); font-size: clamp(0.7rem, 2vw, 1rem); font-weight: 900; line-height: 1; transition: transform 120ms ease, box-shadow 120ms ease; }
-.hand-row { display: flex; gap: clamp(0.1rem, 0.5vw, 0.3rem); overflow: hidden; padding-top: 1rem; }
+.hand-row { display: flex; gap: clamp(0.1rem, 0.5vw, 0.3rem); overflow: visible; padding-top: 0.75rem; }
 .river-grid { display: flex; flex-direction: column; gap: 0.5rem; }
 .river-row { display: flex; align-items: flex-start; gap: 0.5rem; }
 .river-tiles { display: flex; flex-direction: row; flex-wrap: nowrap; gap: 0.25rem; min-width: 0; max-width: 100%; overflow-x: auto; }
@@ -60,7 +60,10 @@ body {
 .send-button { background: #9b641d; color: white; }
 
 @media (max-width: 640px) {
-  .table-surface { padding: 0.85rem; }
+  .table-surface { padding: 0.65rem; }
   .hand-row { gap: 0.1rem; }
+  .hand-row .tile-card { width: 1.3rem; font-size: 0.65rem; }
+  .chat-panel { padding: 0.7rem; }
+  .chat-list { padding: 0.35rem 0; }
   .cpu-panel { padding: 0.55rem; }
 }
