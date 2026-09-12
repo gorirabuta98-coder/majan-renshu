@@ -67,3 +67,9 @@ body {
   .chat-list { padding: 0.35rem 0; }
   .cpu-panel { padding: 0.55rem; }
 }
+
+@media (max-width: 767px) {
+  body { padding-bottom: env(safe-area-inset-bottom); }
+  .table-surface.sticky { background: rgba(255, 253, 245, 0.98); box-shadow: 0 -8px 18px rgba(146, 92, 20, 0.12); }
+  .mode-button, .secondary-button, .force-reset-button { padding: 0.45rem 0.55rem; font-size: 0.7rem; }
+}
