@@ -58,6 +58,10 @@ body {
 .chat-input { min-width: 0; flex: 1; border: 1px solid #e5c675; border-radius: 5px; background: #fffdf5; padding: 0.55rem 0.65rem; font-size: 1rem; outline: none; }
 .chat-input:focus { border-color: #a76d1c; box-shadow: 0 0 0 2px rgba(167, 109, 28, 0.12); }
 .send-button { background: #9b641d; color: white; }
+.chat-history-button, .chat-close-button { border: 1px solid #d7b45a; border-radius: 5px; background: #fffdf5; color: #805916; padding: 0.35rem 0.6rem; font-size: 0.75rem; font-weight: 800; }
+.chat-history-modal { background: rgba(23, 32, 51, 0.42); }
+.chat-history-sheet { width: 100%; max-height: min(70vh, 520px); overflow: hidden; border: 1px solid #f1d58a; border-bottom: 0; border-radius: 12px 12px 0 0; background: #fffdf5; padding: 1rem; box-shadow: 0 -12px 30px rgba(23, 32, 51, 0.2); }
+.chat-history-list { display: flex; max-height: calc(min(70vh, 520px) - 4.5rem); flex-direction: column; gap: 0.65rem; overflow-y: auto; padding-top: 0.85rem; }
 
 @media (max-width: 640px) {
   .table-surface { padding: 0.65rem; }
@@ -71,5 +75,8 @@ body {
 @media (max-width: 767px) {
   body { padding-bottom: env(safe-area-inset-bottom); }
   .table-surface.sticky { background: rgba(255, 253, 245, 0.98); box-shadow: 0 -8px 18px rgba(146, 92, 20, 0.12); }
+  .table-surface.fixed { padding: 0.55rem 0.6rem calc(0.55rem + env(safe-area-inset-bottom)); }
+  .hand-row { gap: 0; }
+  .hand-row .tile-card { width: 1.15rem; font-size: 0.58rem; }
   .mode-button, .secondary-button, .force-reset-button { padding: 0.45rem 0.55rem; font-size: 0.7rem; }
 }
