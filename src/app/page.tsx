@@ -88,7 +88,7 @@ function TileCard({ tile, onClick, disabled, className = "" }: { tile: Tile; onC
 }
 
 function RiverRow({ label, tiles }: { label: string; tiles: Tile[] }) {
-  return <div className="river-row grid h-10 grid-cols-[3rem_1fr] items-center gap-2"><span className="text-xs font-bold leading-none text-slate-500">{label}</span><div className="river-tiles flex flex-row flex-nowrap items-center overflow-x-auto">{tiles.map((tile) => <TileCard key={tile.id} tile={tile} disabled />)}</div></div>;
+  return <div className="river-row flex h-10 flex-row items-center gap-2"><span className="w-12 shrink-0 text-center text-xs font-bold leading-none text-slate-500">{label}</span><div className="river-tiles flex flex-row flex-nowrap items-center overflow-x-auto">{tiles.map((tile) => <TileCard key={tile.id} tile={tile} disabled />)}</div></div>;
 }
 
 function formatTime() { return new Date().toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" }); }
@@ -146,7 +146,7 @@ export default function Home() {
         setBoard((current) => {
           if (!current) return current;
           const hands = current.hands.map((hand) => [...hand]);
-          const discards = current.discards.map((discardedTiles) => [...discardedTiles]);
+          const discards = Array.from({ length: 4 }, (_, index) => [...(current.discards?.[index] ?? [])]);
           const wall = current.wall.slice(1);
           const drawnTile = current.wall[0];
           if (drawnTile) hands[cpu] = [...(hands[cpu] ?? []), drawnTile];
@@ -191,7 +191,7 @@ export default function Home() {
     setBoard((current) => {
       if (!current) return current;
       const hands = current.hands.map((hand) => [...hand]);
-      const discards = current.discards.map((discardedTiles) => [...discardedTiles]);
+      const discards = Array.from({ length: 4 }, (_, playerIndex) => [...(current.discards?.[playerIndex] ?? [])]);
       const discarded = hands[0].splice(index, 1)[0];
       if (!discarded) return current;
       hands[0] = sortHand(hands[0]);
