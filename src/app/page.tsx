@@ -242,14 +242,18 @@ function getBestDiscardIndex(hand: Tile[]) {
   );
 }
 
-function tileClass(tile: Tile) {
-  if (tile.suit === "man") return "text-red-600";
-  if (tile.suit === "pin") return "text-blue-600";
-  if (tile.suit === "sou" || tile.label === "發") return "text-emerald-600";
-  if (tile.label === "中") return "text-red-600";
-  return "text-slate-900";
+// 牌の画像ファイルパスを判定する関数
+function getTileImagePath(tile: Tile): string {
+  if (tile.suit === "man") return `/tiles/Man${tile.value}.svg`;
+  if (tile.suit === "pin") return `/tiles/Pin${tile.value}.svg`;
+  if (tile.suit === "sou") return `/tiles/Sou${tile.value}.svg`;
+
+  // 東・南・西・北・白・發・中
+  const honors = ["Ton", "Nan", "Sha", "Pei", "Haku", "Hatsu", "Chun"];
+  return `/tiles/${honors[tile.value - 1]}.svg`;
 }
 
+// SVG画像対応の TileCard コンポーネント
 function TileCard({
   tile,
   onClick,
@@ -266,23 +270,32 @@ function TileCard({
       type="button"
       disabled={disabled}
       onClick={onClick}
-      className={`tile-card ${tileClass(tile)} ${className} ${disabled ? "cursor-default" : "hover:-translate-y-1 hover:shadow-md"}`}
+      className={`relative inline-flex h-12 w-9 shrink-0 items-center justify-center transition-all select-none ${
+        disabled
+          ? "cursor-default"
+          : "hover:-translate-y-1 hover:brightness-105 active:translate-y-0"
+      } ${className}`}
       aria-label={tile.label}
     >
-      {tile.label}
+      <img
+        src={getTileImagePath(tile)}
+        alt={tile.label}
+        className="h-full w-full object-contain drop-shadow pointer-events-none"
+        loading="eager"
+      />
     </button>
   );
 }
 
 function RiverRow({ label, tiles }: { label: string; tiles: Tile[] }) {
   return (
-    <div className="river-row flex min-h-[42px] flex-row items-center gap-2 py-0.5">
+    <div className="river-row flex min-h-[46px] flex-row items-center gap-2 py-0.5">
       <span className="flex h-full w-12 shrink-0 items-center justify-center text-center text-xs font-bold leading-none text-slate-500">
         {label}
       </span>
-      <div className="river-tiles flex flex-1 flex-row flex-nowrap items-center min-h-[36px] overflow-x-auto gap-1">
+      <div className="river-tiles flex flex-1 flex-row flex-nowrap items-center min-h-[42px] overflow-x-auto gap-1">
         {tiles.map((tile) => (
-          <TileCard key={tile.id} tile={tile} disabled />
+          <TileCard key={tile.id} tile={tile} disabled className="!h-10 !w-7" />
         ))}
       </div>
     </div>
@@ -571,7 +584,7 @@ export default function Home() {
                   />
                 </div>
                 <span className="ml-2 whitespace-nowrap">ドラ</span>
-                <TileCard tile={board.doraIndicator} disabled />
+                <TileCard tile={board.doraIndicator} disabled className="!h-10 !w-7" />
               </div>
             </div>
           </section>
@@ -632,7 +645,7 @@ export default function Home() {
               {role === "coach" ? "観戦中" : board.phase === "player" ? "あなたの番" : "CPU進行"}
             </span>
           </div>
-          <div className="hand-row hand-row-mobile flex w-full max-w-full flex-nowrap gap-0.5 overflow-hidden px-1 md:justify-center">
+          <div className="hand-row hand-row-mobile flex w-full max-w-full flex-nowrap items-center gap-1 overflow-x-auto px-1 py-1 md:justify-center">
             {board.hands[0].map((tile, index) => (
               <TileCard
                 key={tile.id}
