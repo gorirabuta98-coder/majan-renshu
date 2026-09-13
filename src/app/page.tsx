@@ -257,18 +257,12 @@ function TileCard({
   disabled?: boolean;
   className?: string;
 }) {
-  const candidatePaths = useRef<string[]>(getTileImagePath(tile));
+  const candidatePaths = getTileImagePath(tile);
   const [pathIndex, setPathIndex] = useState(0);
   const [hasError, setHasError] = useState(false);
 
-  useEffect(() => {
-    candidatePaths.current = getTileImagePath(tile);
-    setPathIndex(0);
-    setHasError(false);
-  }, [tile]);
-
   const handleImageError = () => {
-    if (pathIndex + 1 < candidatePaths.current.length) {
+    if (pathIndex + 1 < candidatePaths.length) {
       setPathIndex((prev) => prev + 1);
     } else {
       setHasError(true);
@@ -289,7 +283,7 @@ function TileCard({
     >
       {!hasError ? (
         <img
-          src={candidatePaths.current[pathIndex]}
+          src={candidatePaths[pathIndex]}
           alt={tile.label}
           onError={handleImageError}
           className="h-full w-full object-contain drop-shadow pointer-events-none"
@@ -341,6 +335,7 @@ export default function Home() {
 
   useEffect(() => {
     clientIdRef.current = crypto.randomUUID();
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setIsMounted(true);
     setBoard(newBoard(supabase ? null : "local-host"));
   }, []);
@@ -705,7 +700,7 @@ export default function Home() {
                   board.phase !== "player" ||
                   board.turn !== 0
                 }
-                className={`${board.hands[0].length === 14 && index === 13 ? "ml-3" : ""}`}
+                  className={`hand-tile ${board.hands[0].length === 14 && index === 13 ? "ml-3" : ""}`}
               />
             ))}
           </div>
