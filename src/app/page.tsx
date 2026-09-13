@@ -242,7 +242,7 @@ function getBestDiscardIndex(hand: Tile[]) {
   );
 }
 
-// 牌の画像ファイルパスを判定する関数
+// 牌の画像ファイルパスを判定する関数（「西」は Sha / Sya / West の可能性があるため初期値を設定）
 function getTileImagePath(tile: Tile): string {
   if (tile.suit === "man") return `/tiles/Man${tile.value}.svg`;
   if (tile.suit === "pin") return `/tiles/Pin${tile.value}.svg`;
@@ -253,7 +253,7 @@ function getTileImagePath(tile: Tile): string {
   return `/tiles/${honors[tile.value - 1]}.svg`;
 }
 
-// SVG画像対応の TileCard コンポーネント
+// SVG画像対応の TileCard コンポーネント（背景色・フォールバック対応済み）
 function TileCard({
   tile,
   onClick,
@@ -265,21 +265,37 @@ function TileCard({
   disabled?: boolean;
   className?: string;
 }) {
+  const [imgSrc, setImgSrc] = useState(() => getTileImagePath(tile));
+
+  useEffect(() => {
+    setImgSrc(getTileImagePath(tile));
+  }, [tile]);
+
+  // 画像読み込みエラー発生時のフォールバック処理（特に「西」の Sha -> Sya -> West などの表記揺れ対策）
+  const handleImageError = () => {
+    if (imgSrc.includes("Sha")) {
+      setImgSrc(imgSrc.replace("Sha", "Sya"));
+    } else if (imgSrc.includes("Sya")) {
+      setImgSrc(imgSrc.replace("Sya", "West"));
+    }
+  };
+
   return (
     <button
       type="button"
       disabled={disabled}
       onClick={onClick}
-      className={`relative inline-flex h-12 w-9 shrink-0 items-center justify-center transition-all select-none ${
+      className={`relative inline-flex h-12 w-9 shrink-0 items-center justify-center rounded bg-amber-50/95 p-0.5 shadow-md transition-all select-none ${
         disabled
-          ? "cursor-default"
-          : "hover:-translate-y-1 hover:brightness-105 active:translate-y-0"
+          ? "cursor-default opacity-90"
+          : "hover:-translate-y-1 hover:brightness-105 active:translate-y-0 cursor-pointer"
       } ${className}`}
       aria-label={tile.label}
     >
       <img
-        src={getTileImagePath(tile)}
+        src={imgSrc}
         alt={tile.label}
+        onError={handleImageError}
         className="h-full w-full object-contain drop-shadow pointer-events-none"
         loading="eager"
       />
@@ -290,7 +306,7 @@ function TileCard({
 function RiverRow({ label, tiles }: { label: string; tiles: Tile[] }) {
   return (
     <div className="river-row flex min-h-[46px] flex-row items-center gap-2 py-0.5">
-      <span className="flex h-full w-12 shrink-0 items-center justify-center text-center text-xs font-bold leading-none text-slate-500">
+      <span className="flex h-full w-12 shrink-0 items-center justify-center text-center text-xs font-bold leading-none text-emerald-200">
         {label}
       </span>
       <div className="river-tiles flex flex-1 flex-row flex-nowrap items-center min-h-[42px] overflow-x-auto gap-1">
@@ -501,22 +517,22 @@ export default function Home() {
 
   if (!isMounted || !board)
     return (
-      <main className="flex min-h-screen items-center justify-center bg-amber-50 text-sm font-bold text-amber-800">
+      <main className="flex min-h-screen items-center justify-center bg-emerald-950 text-sm font-bold text-emerald-200">
         対局を準備しています...
       </main>
     );
 
   return (
-    <main className="min-h-screen bg-amber-50 text-slate-900">
-      <header className="mobile-compact-header border-b border-amber-200 bg-white/75 px-4 py-4 shadow-sm backdrop-blur sm:px-8">
+    <main className="min-h-screen bg-emerald-950 text-emerald-50">
+      <header className="mobile-compact-header border-b border-emerald-800 bg-emerald-900/90 px-4 py-4 shadow-md backdrop-blur sm:px-8">
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-4">
           <div>
-            <p className="text-xs font-bold uppercase tracking-[0.2em] text-amber-700">MAHJONG COACHING ROOM</p>
-            <h1 className="mt-1 text-2xl font-black tracking-tight sm:text-3xl">東一局 / 指導対局</h1>
+            <p className="text-xs font-bold uppercase tracking-[0.2em] text-emerald-400">MAHJONG COACHING ROOM</p>
+            <h1 className="mt-1 text-2xl font-black tracking-tight text-white sm:text-3xl">東一局 / 指導対局</h1>
           </div>
           <div className="text-right">
-            <p className="text-xs text-slate-500">{connection}</p>
-            <p className="mt-1 text-sm font-bold text-amber-800">残り {board.wall.length} 枚</p>
+            <p className="text-xs text-emerald-300">{connection}</p>
+            <p className="mt-1 text-sm font-bold text-emerald-200">残り {board.wall.length} 枚</p>
           </div>
         </div>
       </header>
@@ -526,8 +542,8 @@ export default function Home() {
           <section className="relative z-10 w-full min-w-0 flex-1 space-y-2 md:space-y-5">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
-                <p className="mobile-hide-copy text-sm font-bold text-amber-700">{board.lastAction}</p>
-                <p className="mobile-hide-copy text-xs text-slate-500">
+                <p className="mobile-hide-copy text-sm font-bold text-emerald-300">{board.lastAction}</p>
+                <p className="mobile-hide-copy text-xs text-emerald-400">
                   {board.gameMode === "READY"
                     ? "対局開始を押してホストになります"
                     : board.phase === "player"
@@ -564,10 +580,10 @@ export default function Home() {
               </div>
             </div>
 
-            <div className="table-surface">
+            <div className="table-surface bg-emerald-900/90 border border-emerald-700/80 rounded-lg p-4 shadow-xl backdrop-blur-sm">
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
-                  <h2 className="section-title">河</h2>
+                  <h2 className="section-title text-emerald-200 font-bold">河</h2>
                 </div>
                 <div className="river-grid">
                   {PLAYER_NAMES.map((playerName, playerIndex) => (
@@ -575,11 +591,11 @@ export default function Home() {
                   ))}
                 </div>
               </div>
-              <div className="wall-line">
+              <div className="wall-line mt-4 flex items-center gap-2 border-t border-emerald-800 pt-3 text-xs text-emerald-300">
                 <span>山</span>
-                <div className="h-2 flex-1 rounded-full bg-amber-300/70">
+                <div className="h-2 flex-1 rounded-full bg-emerald-950">
                   <div
-                    className="h-full rounded-full bg-amber-600 transition-all"
+                    className="h-full rounded-full bg-emerald-400 transition-all"
                     style={{ width: `${(board.wall.length / 82) * 100}%` }}
                   />
                 </div>
@@ -589,63 +605,65 @@ export default function Home() {
             </div>
           </section>
 
-          <aside className="chat-panel relative z-10 h-[150px] w-full shrink-0 md:sticky md:top-4 md:h-[430px] md:w-80">
-            <div className="flex items-center justify-between border-b border-amber-200 pb-2">
+          <aside className="chat-panel relative z-10 h-[150px] w-full shrink-0 rounded-lg border border-emerald-700/80 bg-emerald-900/90 p-3 shadow-xl backdrop-blur-sm md:sticky md:top-4 md:h-[430px] md:w-80">
+            <div className="flex items-center justify-between border-b border-emerald-800 pb-2">
               <div>
-                <h2 className="section-title">指導チャット</h2>
-                <p className="text-xs text-slate-500">全端末にリアルタイム同期</p>
+                <h2 className="section-title text-emerald-200 font-bold">指導チャット</h2>
+                <p className="text-xs text-emerald-400">全端末にリアルタイム同期</p>
               </div>
               <div className="flex items-center gap-2">
                 <button type="button" onClick={() => setIsChatOpen(true)} className="chat-history-button md:hidden">
                   履歴
                 </button>
-                <span className="live-dot">LIVE</span>
+                <span className="live-dot text-emerald-400 font-bold text-xs">LIVE</span>
               </div>
             </div>
-            <div className="chat-list hidden max-h-[120px] overflow-y-auto md:flex md:max-h-[250px]">
+            <div className="chat-list hidden max-h-[120px] flex-col gap-2 overflow-y-auto pt-2 md:flex md:max-h-[250px]">
               {messages.length === 0 ? (
-                <p className="py-4 text-center text-sm text-slate-400">牌譜を見ながら会話できます</p>
+                <p className="py-4 text-center text-sm text-emerald-400">牌譜を見ながら会話できます</p>
               ) : (
                 messages.map((message) => (
-                  <div key={message.id} className={`chat-bubble ${message.role === role ? "mine" : ""}`}>
-                    <div className="flex justify-between gap-2 text-[11px] font-bold text-slate-500">
+                  <div key={message.id} className={`chat-bubble p-2 rounded bg-emerald-950/80 border border-emerald-800 ${message.role === role ? "mine border-emerald-500" : ""}`}>
+                    <div className="flex justify-between gap-2 text-[11px] font-bold text-emerald-300">
                       <span>{message.role === "coach" ? "指導者" : "打者"}</span>
                       <time>{message.time}</time>
                     </div>
-                    <p className="mt-1 text-sm">{message.text}</p>
+                    <p className="mt-1 text-sm text-emerald-100">{message.text}</p>
                   </div>
                 ))
               )}
             </div>
-            <form onSubmit={sendChat} className="mt-auto hidden gap-2 border-t border-amber-200 pt-2 md:flex">
+            <form onSubmit={sendChat} className="mt-auto hidden gap-2 border-t border-emerald-800 pt-2 md:flex">
               <input
                 value={chatText}
                 onChange={(event) => setChatText(event.target.value)}
                 placeholder="メッセージを入力"
-                className="chat-input"
+                className="chat-input flex-1 rounded bg-emerald-950 px-3 py-1.5 text-sm text-emerald-100 border border-emerald-700 focus:outline-none focus:border-emerald-400"
               />
-              <button type="submit" className="send-button" aria-label="送信">
+              <button type="submit" className="send-button rounded bg-emerald-600 px-3 py-1.5 text-sm font-bold text-white hover:bg-emerald-500" aria-label="送信">
                 送信
               </button>
             </form>
           </aside>
         </div>
 
-        <div className="table-surface fixed inset-x-0 bottom-0 z-50 w-full max-w-full overflow-hidden rounded-none border-x-0 md:static md:z-10 md:rounded-lg md:border-x">
-          <div className="flex items-center justify-between">
+        <div className="table-surface fixed inset-x-0 bottom-0 z-50 w-full max-w-full overflow-hidden rounded-none border-x-0 border-t border-emerald-700/80 bg-emerald-900/95 p-3 shadow-2xl backdrop-blur-md md:static md:z-10 md:rounded-lg md:border">
+          <div className="flex items-center justify-between mb-2">
             <div className="flex items-center gap-2">
-              <h2 className="section-title">あなたの手牌</h2>
-              <span className="rounded bg-amber-200 px-2 py-0.5 text-xs font-bold text-amber-900">
+              <h2 className="section-title text-emerald-200 font-bold">あなたの手牌</h2>
+              <span className="rounded bg-emerald-800 px-2 py-0.5 text-xs font-bold text-emerald-200 border border-emerald-600">
                 {getShantenText(board.hands[0])}
               </span>
             </div>
             <span
-              className={`turn-pill ${board.phase === "player" && role === "player" ? "turn-pill-active" : ""}`}
+              className={`turn-pill px-2.5 py-1 rounded text-xs font-bold ${
+                board.phase === "player" && role === "player" ? "bg-emerald-500 text-white animate-pulse" : "bg-emerald-950 text-emerald-400"
+              }`}
             >
               {role === "coach" ? "観戦中" : board.phase === "player" ? "あなたの番" : "CPU進行"}
             </span>
           </div>
-          <div className="hand-row hand-row-mobile flex w-full max-w-full flex-nowrap items-center gap-1 overflow-x-auto px-1 py-1 md:justify-center">
+          <div className="hand-row hand-row-mobile flex w-full max-w-full flex-nowrap items-center gap-1.5 overflow-x-auto px-1 py-1 md:justify-center">
             {board.hands[0].map((tile, index) => (
               <TileCard
                 key={tile.id}
@@ -662,39 +680,39 @@ export default function Home() {
               />
             ))}
           </div>
-          <form onSubmit={sendChat} className="mt-2 flex gap-2 border-t border-amber-200 pt-2 md:hidden">
+          <form onSubmit={sendChat} className="mt-2 flex gap-2 border-t border-emerald-800 pt-2 md:hidden">
             <input
               value={chatText}
               onChange={(event) => setChatText(event.target.value)}
               placeholder="メッセージを入力"
-              className="chat-input"
+              className="chat-input flex-1 rounded bg-emerald-950 px-3 py-1.5 text-sm text-emerald-100 border border-emerald-700"
             />
-            <button type="submit" className="send-button" aria-label="送信">
+            <button type="submit" className="send-button rounded bg-emerald-600 px-3 py-1.5 text-sm font-bold text-white" aria-label="送信">
               送信
             </button>
           </form>
         </div>
 
         {isChatOpen && (
-          <div className="chat-history-modal fixed inset-0 z-[60] flex items-end justify-center md:hidden">
-            <div className="chat-history-sheet">
-              <div className="flex items-center justify-between border-b border-amber-200 pb-3">
-                <h2 className="section-title">指導チャットの履歴</h2>
-                <button type="button" onClick={() => setIsChatOpen(false)} className="chat-close-button">
+          <div className="chat-history-modal fixed inset-0 z-[60] flex items-end justify-center bg-black/50 md:hidden">
+            <div className="chat-history-sheet w-full max-h-[80vh] rounded-t-xl bg-emerald-900 p-4 border-t border-emerald-700">
+              <div className="flex items-center justify-between border-b border-emerald-800 pb-3">
+                <h2 className="section-title text-emerald-200 font-bold">指導チャットの履歴</h2>
+                <button type="button" onClick={() => setIsChatOpen(false)} className="chat-close-button text-sm text-emerald-400">
                   閉じる
                 </button>
               </div>
-              <div className="chat-history-list">
+              <div className="chat-history-list mt-3 flex flex-col gap-2 overflow-y-auto max-h-[60vh]">
                 {messages.length === 0 ? (
-                  <p className="py-8 text-center text-sm text-slate-400">まだメッセージはありません</p>
+                  <p className="py-8 text-center text-sm text-emerald-400">まだメッセージはありません</p>
                 ) : (
                   messages.map((message) => (
-                    <div key={message.id} className={`chat-bubble ${message.role === role ? "mine" : ""}`}>
-                      <div className="flex justify-between gap-2 text-[11px] font-bold text-slate-500">
+                    <div key={message.id} className={`chat-bubble p-2 rounded bg-emerald-950/80 border border-emerald-800 ${message.role === role ? "mine border-emerald-500" : ""}`}>
+                      <div className="flex justify-between gap-2 text-[11px] font-bold text-emerald-300">
                         <span>{message.role === "coach" ? "指導者" : "打者"}</span>
                         <time>{message.time}</time>
                       </div>
-                      <p className="mt-1 text-sm">{message.text}</p>
+                      <p className="mt-1 text-sm text-emerald-100">{message.text}</p>
                     </div>
                   ))
                 )}
