@@ -235,7 +235,7 @@ function getTileImagePath(tile: Tile): string[] {
   const honorNames: Record<number, string[]> = {
     1: ["Ton.svg", "ton.svg", "1.svg"],
     2: ["Nan.svg", "nan.svg", "2.svg"],
-    3: ["Sha.svg", "Sya.svg", "West.svg", "Nishi.svg", "sha.svg", "3.svg"], // 「西」のあらゆる名前パターンを網羅
+    3: ["Sha.svg", "Sya.svg", "West.svg", "Nishi.svg", "sha.svg", "3.svg"],
     4: ["Pei.svg", "pei.svg", "North.svg", "4.svg"],
     5: ["Haku.svg", "haku.svg", "5.svg"],
     6: ["Hatsu.svg", "hatsu.svg", "6.svg"],
@@ -274,7 +274,7 @@ function TileCard({
       type="button"
       disabled={disabled}
       onClick={onClick}
-      className={`relative inline-flex h-12 w-9 shrink-0 items-center justify-center rounded bg-amber-50 p-0.5 shadow-md transition-all select-none border border-amber-200/50 ${
+      className={`relative inline-flex aspect-[3/4] h-auto w-[calc((100vw-24px)/14.5)] max-w-[36px] sm:h-12 sm:w-9 shrink-0 items-center justify-center rounded bg-amber-50 p-0.5 shadow-md transition-all select-none border border-amber-200/50 ${
         disabled
           ? "cursor-default opacity-95"
           : "hover:-translate-y-1 hover:brightness-105 active:translate-y-0 cursor-pointer"
@@ -290,8 +290,7 @@ function TileCard({
           loading="eager"
         />
       ) : (
-        // SVG画像がサーバーになかった場合でも「西」等の文字牌として綺麗に表示する万能フォールバック
-        <span className="flex h-full w-full items-center justify-center font-black text-slate-800 text-sm leading-none">
+        <span className="flex h-full w-full items-center justify-center font-black text-slate-800 text-[10px] sm:text-sm leading-none">
           {tile.label}
         </span>
       )}
@@ -307,7 +306,7 @@ function RiverRow({ label, tiles }: { label: string; tiles: Tile[] }) {
       </span>
       <div className="river-tiles flex flex-1 flex-row flex-nowrap items-center min-h-[42px] overflow-x-auto gap-1">
         {tiles.map((tile) => (
-          <TileCard key={tile.id} tile={tile} disabled className="!h-10 !w-7" />
+          <TileCard key={tile.id} tile={tile} disabled className="!h-10 !w-7 !max-w-[28px]" />
         ))}
       </div>
     </div>
@@ -335,7 +334,6 @@ export default function Home() {
 
   useEffect(() => {
     clientIdRef.current = crypto.randomUUID();
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setIsMounted(true);
     setBoard(newBoard(supabase ? null : "local-host"));
   }, []);
@@ -605,7 +603,7 @@ export default function Home() {
                   />
                 </div>
                 <span className="ml-2 whitespace-nowrap">ドラ</span>
-                <TileCard tile={board.doraIndicator} disabled className="!h-10 !w-7" />
+                <TileCard tile={board.doraIndicator} disabled className="!h-10 !w-7 !max-w-[28px]" />
               </div>
             </div>
           </section>
@@ -669,7 +667,7 @@ export default function Home() {
           </aside>
         </div>
 
-        <div className="fixed inset-x-0 bottom-0 z-50 w-full max-w-full overflow-hidden rounded-none border-x-0 border-t border-emerald-700/80 bg-emerald-900/95 p-3 shadow-2xl backdrop-blur-md md:static md:z-10 md:rounded-lg md:border">
+        <div className="fixed inset-x-0 bottom-0 z-50 w-full max-w-full overflow-hidden rounded-none border-x-0 border-t border-emerald-700/80 bg-emerald-900/95 p-2 sm:p-3 shadow-2xl backdrop-blur-md md:static md:z-10 md:rounded-lg md:border">
           <div className="flex items-center justify-between mb-2">
             <div className="flex items-center gap-2">
               <h2 className="text-white font-black text-base">あなたの手牌</h2>
@@ -687,7 +685,7 @@ export default function Home() {
               {role === "coach" ? "観戦中" : board.phase === "player" ? "あなたの番" : "CPU進行"}
             </span>
           </div>
-          <div className="flex w-full max-w-full flex-nowrap items-center gap-1.5 overflow-x-auto px-1 py-1 md:justify-center">
+          <div className="flex w-full max-w-full flex-nowrap items-center justify-between gap-0.5 px-0.5 py-1 sm:gap-1.5 sm:px-1 md:justify-center overflow-x-hidden">
             {board.hands[0].map((tile, index) => (
               <TileCard
                 key={tile.id}
@@ -700,7 +698,7 @@ export default function Home() {
                   board.phase !== "player" ||
                   board.turn !== 0
                 }
-                  className={`hand-tile ${board.hands[0].length === 14 && index === 13 ? "ml-3" : ""}`}
+                className={`hand-tile ${board.hands[0].length === 14 && index === 13 ? "ml-0.5 sm:ml-3" : ""}`}
               />
             ))}
           </div>
