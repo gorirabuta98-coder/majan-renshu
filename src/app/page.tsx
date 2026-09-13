@@ -105,6 +105,115 @@ function sortHand(hand: Tile[]) {
   );
 }
 
+function getShantenText(hand: Tile[]): string {
+  if (!hand || hand.length === 0) return "";
+
+  const counts = new Array(34).fill(0);
+  const suitOffset: Record<Suit, number> = { man: 0, pin: 9, sou: 18, honor: 27 };
+
+  hand.forEach((t) => {
+    const idx = suitOffset[t.suit] + (t.value - 1);
+    if (idx >= 0 && idx < 34) {
+      counts[idx] = Math.min(4, counts[idx] + 1);
+    }
+  });
+
+  // 国士無双
+  const kokushiIndices = [0, 8, 9, 17, 18, 26, 27, 28, 29, 30, 31, 32, 33];
+  let kokushiKinds = 0;
+  let kokushiHasPair = false;
+  kokushiIndices.forEach((i) => {
+    if (counts[i] > 0) {
+      kokushiKinds++;
+      if (counts[i] >= 2) kokushiHasPair = true;
+    }
+  });
+  const kokushiShanten = 13 - kokushiKinds - (kokushiHasPair ? 1 : 0);
+
+  // 七対子
+  let pairs = 0;
+  let kinds = 0;
+  counts.forEach((c) => {
+    if (c >= 2) pairs++;
+    if (c >= 1) kinds++;
+  });
+  let chiitoiShanten = 6 - pairs;
+  if (kinds < 7) {
+    chiitoiShanten += 7 - kinds;
+  }
+
+  // 一般形
+  let minNormalShanten = 8;
+
+  function backtrack(index: number, melds: number, taatsu: number, head: boolean) {
+    const currentShanten = 8 - (2 * melds + taatsu + (head ? 1 : 0));
+    if (currentShanten < minNormalShanten) {
+      minNormalShanten = currentShanten;
+    }
+
+    while (index < 34 && counts[index] === 0) index++;
+    if (index >= 34) return;
+
+    // 雀頭
+    if (!head && counts[index] >= 2) {
+      counts[index] -= 2;
+      backtrack(index, melds, taatsu, true);
+      counts[index] += 2;
+    }
+
+    // 刻子
+    if (counts[index] >= 3) {
+      counts[index] -= 3;
+      backtrack(index, melds + 1, taatsu, head);
+      counts[index] += 3;
+    }
+
+    // 順子
+    if (index < 27 && index % 9 <= 6 && counts[index + 1] > 0 && counts[index + 2] > 0) {
+      counts[index]--;
+      counts[index + 1]--;
+      counts[index + 2]--;
+      backtrack(index, melds + 1, taatsu, head);
+      counts[index]++;
+      counts[index + 1]++;
+      counts[index + 2]++;
+    }
+
+    // 塔子 (対子・両面・嵌張)
+    if (melds + taatsu < 4) {
+      if (counts[index] >= 2) {
+        counts[index] -= 2;
+        backtrack(index, melds, taatsu + 1, head);
+        counts[index] += 2;
+      }
+      if (index < 27 && index % 9 <= 7 && counts[index + 1] > 0) {
+        counts[index]--;
+        counts[index + 1]--;
+        backtrack(index, melds, taatsu + 1, head);
+        counts[index]++;
+        counts[index + 1]++;
+      }
+      if (index < 27 && index % 9 <= 6 && counts[index + 2] > 0) {
+        counts[index]--;
+        counts[index + 2]--;
+        backtrack(index, melds, taatsu + 1, head);
+        counts[index]++;
+        counts[index + 2]++;
+      }
+    }
+
+    backtrack(index + 1, melds, taatsu, head);
+  }
+
+  backtrack(0, 0, 0, false);
+
+  const minShanten = Math.min(minNormalShanten, chiitoiShanten, kokushiShanten);
+
+  if (minShanten <= -1) return "和了";
+  if (minShanten === 0) return "聴牌";
+  return `${minShanten}向聴`;
+}
+
 function getBestDiscardIndex(hand: Tile[]) {
   const tileCount = (tile: Tile) =>
     hand.filter((candidate) => candidate.suit === tile.suit && candidate.value === tile.value).length;
@@ -199,7 +308,6 @@ export default function Home() {
   const isHostRef = useRef(!supabase);
   const clientIdRef = useRef("");
 
-  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => {
     clientIdRef.current = crypto.randomUUID();
     setIsMounted(true);
@@ -245,7 +353,6 @@ export default function Home() {
     };
   }, [isMounted]);
 
-  // CPU打牌の1ステップ進行ロジック（下家 -> 対面 -> 上家を1ターンずつ確実に処理）
   useEffect(() => {
     if (
       !isHostRef.current ||
@@ -513,9 +620,11 @@ export default function Home() {
 
         <div className="table-surface fixed inset-x-0 bottom-0 z-50 w-full max-w-full overflow-hidden rounded-none border-x-0 md:static md:z-10 md:rounded-lg md:border-x">
           <div className="flex items-center justify-between">
-            <div>
+            <div className="flex items-center gap-2">
               <h2 className="section-title">あなたの手牌</h2>
-              <p className="text-xs text-slate-500">東家 / {board.hands[0].length}枚</p>
+              <span className="rounded bg-amber-200 px-2 py-0.5 text-xs font-bold text-amber-900">
+                {getShantenText(board.hands[0])}
+              </span>
             </div>
             <span
               className={`turn-pill ${board.phase === "player" && role === "player" ? "turn-pill-active" : ""}`}
