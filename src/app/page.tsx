@@ -274,7 +274,7 @@ function TileCard({
       type="button"
       disabled={disabled}
       onClick={onClick}
-      className={`relative inline-flex aspect-[3/4] h-auto w-[calc((100vw-24px)/14.5)] max-w-[36px] sm:h-12 sm:w-9 shrink-0 items-center justify-center rounded bg-amber-50 p-0.5 shadow-md transition-all select-none border border-amber-200/50 ${
+      className={`relative inline-flex aspect-[3/4] h-auto w-[calc((100vw-36px)/15)] max-w-[30px] sm:h-12 sm:w-9 sm:max-w-[36px] shrink-0 items-center justify-center rounded bg-amber-50 p-0.5 shadow-md transition-all select-none border border-amber-200/50 ${
         disabled
           ? "cursor-default opacity-95"
           : "hover:-translate-y-1 hover:brightness-105 active:translate-y-0 cursor-pointer"
@@ -667,10 +667,10 @@ export default function Home() {
           </aside>
         </div>
 
-        <div className="fixed inset-x-0 bottom-0 z-50 w-full max-w-full overflow-hidden rounded-none border-x-0 border-t border-emerald-700/80 bg-emerald-900/95 p-2 sm:p-3 shadow-2xl backdrop-blur-md md:static md:z-10 md:rounded-lg md:border">
-          <div className="flex items-center justify-between mb-2">
+        <div className="fixed inset-x-0 bottom-0 z-50 w-full max-w-full overflow-hidden rounded-none border-x-0 border-t border-emerald-700/80 bg-emerald-900/95 p-1.5 sm:p-3 shadow-2xl backdrop-blur-md md:static md:z-10 md:rounded-lg md:border">
+          <div className="flex items-center justify-between mb-1.5 sm:mb-2">
             <div className="flex items-center gap-2">
-              <h2 className="text-white font-black text-base">あなたの手牌</h2>
+              <h2 className="text-white font-black text-sm sm:text-base">あなたの手牌</h2>
               <span className="rounded bg-amber-500/20 px-2 py-0.5 text-xs font-bold text-white border border-amber-400/50">
                 {getShantenText(board.hands[0])}
               </span>
@@ -698,7 +698,7 @@ export default function Home() {
                   board.phase !== "player" ||
                   board.turn !== 0
                 }
-                className={`hand-tile ${board.hands[0].length === 14 && index === 13 ? "ml-0.5 sm:ml-3" : ""}`}
+                className={`hand-tile ${board.hands[0].length === 14 && index === 13 ? "ml-1 sm:ml-3" : ""}`}
               />
             ))}
           </div>
