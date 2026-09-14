@@ -81,8 +81,10 @@ function sortHand(hand: Tile[]) {
   );
 }
 
-function getShantenText(hand: Tile[]): string {
-  if (!hand || hand.length === 0) return "";
+// 副露（鳴き）を含めたシャンテン数計算
+function getShantenText(hand: Tile[], melds: Meld[] = []): string {
+  if (!hand) return "";
+  const meldCount = melds.length;
   const counts = new Array(34).fill(0);
   const suitOffset: Record<Suit, number> = { man: 0, pin: 9, sou: 18, honor: 27 };
 
@@ -93,29 +95,36 @@ function getShantenText(hand: Tile[]): string {
     }
   });
 
-  const kokushiIndices = [0, 8, 9, 17, 18, 26, 27, 28, 29, 30, 31, 32, 33];
-  let kokushiKinds = 0;
-  let kokushiHasPair = false;
-  kokushiIndices.forEach((i) => {
-    if (counts[i] > 0) {
-      kokushiKinds++;
-      if (counts[i] >= 2) kokushiHasPair = true;
-    }
-  });
-  const kokushiShanten = 13 - kokushiKinds - (kokushiHasPair ? 1 : 0);
+  let chiitoiShanten = 99;
+  let kokushiShanten = 99;
 
-  let pairs = 0;
-  let kinds = 0;
-  counts.forEach((c) => {
-    if (c >= 2) pairs++;
-    if (c >= 1) kinds++;
-  });
-  let chiitoiShanten = 6 - pairs;
-  if (kinds < 7) chiitoiShanten += 7 - kinds;
+  // 門前（鳴いていない）時のみ七対子・国士無双を判定
+  if (meldCount === 0) {
+    const kokushiIndices = [0, 8, 9, 17, 18, 26, 27, 28, 29, 30, 31, 32, 33];
+    let kokushiKinds = 0;
+    let kokushiHasPair = false;
+    kokushiIndices.forEach((i) => {
+      if (counts[i] > 0) {
+        kokushiKinds++;
+        if (counts[i] >= 2) kokushiHasPair = true;
+      }
+    });
+    kokushiShanten = 13 - kokushiKinds - (kokushiHasPair ? 1 : 0);
+
+    let pairs = 0;
+    let kinds = 0;
+    counts.forEach((c) => {
+      if (c >= 2) pairs++;
+      if (c >= 1) kinds++;
+    });
+    chiitoiShanten = 6 - pairs;
+    if (kinds < 7) chiitoiShanten += 7 - kinds;
+  }
 
   let minNormalShanten = 8;
-  function backtrack(index: number, melds: number, taatsu: number, head: boolean) {
-    const currentShanten = 8 - (2 * melds + taatsu + (head ? 1 : 0));
+  function backtrack(index: number, m: number, taatsu: number, head: boolean) {
+    const totalMelds = m + meldCount;
+    const currentShanten = 8 - (2 * totalMelds + taatsu + (head ? 1 : 0));
     if (currentShanten < minNormalShanten) minNormalShanten = currentShanten;
 
     while (index < 34 && counts[index] === 0) index++;
@@ -123,13 +132,13 @@ function getShantenText(hand: Tile[]): string {
 
     if (!head && counts[index] >= 2) {
       counts[index] -= 2;
-      backtrack(index, melds, taatsu, true);
+      backtrack(index, m, taatsu, true);
       counts[index] += 2;
     }
 
     if (counts[index] >= 3) {
       counts[index] -= 3;
-      backtrack(index, melds + 1, taatsu, head);
+      backtrack(index, m + 1, taatsu, head);
       counts[index] += 3;
     }
 
@@ -137,34 +146,34 @@ function getShantenText(hand: Tile[]): string {
       counts[index]--;
       counts[index + 1]--;
       counts[index + 2]--;
-      backtrack(index, melds + 1, taatsu, head);
+      backtrack(index, m + 1, taatsu, head);
       counts[index]++;
       counts[index + 1]++;
       counts[index + 2]++;
     }
 
-    if (melds + taatsu < 4) {
+    if (totalMelds + taatsu < 4) {
       if (counts[index] >= 2) {
         counts[index] -= 2;
-        backtrack(index, melds, taatsu + 1, head);
+        backtrack(index, m, taatsu + 1, head);
         counts[index] += 2;
       }
       if (index < 27 && index % 9 <= 7 && counts[index + 1] > 0) {
         counts[index]--;
         counts[index + 1]--;
-        backtrack(index, melds, taatsu + 1, head);
+        backtrack(index, m, taatsu + 1, head);
         counts[index]++;
         counts[index + 1]++;
       }
       if (index < 27 && index % 9 <= 6 && counts[index + 2] > 0) {
         counts[index]--;
         counts[index + 2]--;
-        backtrack(index, melds, taatsu + 1, head);
+        backtrack(index, m, taatsu + 1, head);
         counts[index]++;
         counts[index + 2]++;
       }
     }
-    backtrack(index + 1, melds, taatsu, head);
+    backtrack(index + 1, m, taatsu, head);
   }
 
   backtrack(0, 0, 0, false);
@@ -175,8 +184,8 @@ function getShantenText(hand: Tile[]): string {
   return `${minShanten}向聴`;
 }
 
-function getShantenValue(hand: Tile[]): number {
-  const text = getShantenText(hand);
+function getShantenValue(hand: Tile[], melds: Meld[] = []): number {
+  const text = getShantenText(hand, melds);
   if (text === "和了") return -1;
   if (text === "聴牌") return 0;
   const match = text.match(/(\d+)向聴/);
@@ -187,7 +196,7 @@ function canRiichi(hand: Tile[], melds: Meld[] = []): boolean {
   if (melds.length > 0 || hand.length !== 14) return false;
   return hand.some((_, index) => {
     const testHand = hand.filter((_, i) => i !== index);
-    return getShantenValue(testHand) === 0;
+    return getShantenValue(testHand, melds) === 0;
   });
 }
 
@@ -362,12 +371,10 @@ function TileCard({
 function RiverRow({
   label,
   tiles,
-  melds = [],
   isRiichi,
 }: {
   label: string;
   tiles: Tile[];
-  melds?: Meld[];
   isRiichi?: boolean;
 }) {
   return (
@@ -386,17 +393,6 @@ function RiverRow({
         {tiles.map((tile) => (
           <TileCard key={tile.id} tile={tile} disabled className="!h-10 !w-7 !max-w-[28px]" />
         ))}
-        {melds.length > 0 && (
-          <div className="ml-2 flex items-center gap-1 border-l border-emerald-700/60 pl-2">
-            {melds.map((m, idx) => (
-              <div key={idx} className="flex gap-0.5 bg-emerald-950/60 p-0.5 rounded border border-emerald-800">
-                {m.tiles.map((t) => (
-                  <TileCard key={t.id} tile={t} disabled className="!h-8 !w-5 !max-w-[22px]" />
-                ))}
-              </div>
-            ))}
-          </div>
-        )}
       </div>
     </div>
   );
@@ -466,7 +462,7 @@ export default function Home() {
     };
   }, [isMounted]);
 
-  // CPU打牌および鳴きチェックロジック
+  // CPU打牌および鳴き・ロンチェック
   const processCpuTurn = useCallback(() => {
     if (!isHostRef.current || roleRef.current !== "player" || board?.gameMode !== "PLAYING") return;
     if (board?.phase !== "cpu" || board?.winner) return;
@@ -488,8 +484,8 @@ export default function Home() {
 
     hands[currentTurn] = [...hands[currentTurn], drawnTile];
 
-    // ツモ和了チェック
-    if (getShantenValue(hands[currentTurn]) === -1) {
+    // CPUのツモ和了チェック
+    if (getShantenValue(hands[currentTurn], board.melds[currentTurn]) === -1) {
       const next: BoardState = {
         ...board,
         hands,
@@ -515,7 +511,8 @@ export default function Home() {
 
     // プレイヤーへの割り込み（ロン・ポン・チー・カン）判定
     const playerHand = hands[0];
-    const canRonResult = getShantenValue([...playerHand, discarded]) === -1;
+    const playerMelds = board.melds[0];
+    const canRonResult = getShantenValue([...playerHand, discarded], playerMelds) === -1;
     const canPonResult = canPon(playerHand, discarded);
     const canKanResult = canDaiminkan(playerHand, discarded);
     const canChiResult = canChi(playerHand, discarded, currentTurn, 0);
@@ -535,7 +532,9 @@ export default function Home() {
           canKan: canKanResult,
           canChi: canChiResult,
         },
-        lastAction: `${PLAYER_NAMES[currentTurn]}が${discarded.label}を打牌 (鳴き・ロン可能)`,
+        lastAction: `${PLAYER_NAMES[currentTurn]}が${discarded.label}を打牌 (${
+          canRonResult ? "ロン可能！" : "鳴き可能"
+        })`,
       };
       setBoard(next);
       broadcast(next);
@@ -593,7 +592,7 @@ export default function Home() {
       board.gameMode === "PLAYING"
     ) {
       const currentHand = board.hands[0];
-      if (getShantenValue(currentHand) !== -1) {
+      if (getShantenValue(currentHand, board.melds[0]) !== -1) {
         const timer = setTimeout(() => {
           discard(currentHand.length - 1);
         }, 700);
@@ -642,7 +641,6 @@ export default function Home() {
     broadcast(next);
   };
 
-  // 鳴き・ロンのアクションハンドラ
   const handlePass = () => {
     if (!board || !board.claimState) return;
     const nextTurn = board.claimState.fromPlayer + 1;
@@ -725,7 +723,7 @@ export default function Home() {
 
     const next: BoardState = {
       ...board,
-      hands: board.hands.map((h, i) => (i === 0 ? newHand : h)),
+      hands: board.hands.map((h, i) => (i === 0 ? sortHand(newHand) : h)),
       melds,
       turn: 0,
       phase: "player",
@@ -742,7 +740,6 @@ export default function Home() {
     const hand = [...board.hands[0]];
     const v = targetTile.value;
 
-    // 鳴く候補の2枚を探す（簡易実装：連続する2枚を取り出す）
     let c1 = hand.find((t) => t.suit === targetTile.suit && t.value === v - 2);
     let c2 = hand.find((t) => t.suit === targetTile.suit && t.value === v - 1);
     if (!c1 || !c2) {
@@ -766,7 +763,7 @@ export default function Home() {
 
     const next: BoardState = {
       ...board,
-      hands: board.hands.map((h, i) => (i === 0 ? newHand : h)),
+      hands: board.hands.map((h, i) => (i === 0 ? sortHand(newHand) : h)),
       melds,
       turn: 0,
       phase: "player",
@@ -835,7 +832,7 @@ export default function Home() {
                   {board.winner
                     ? "対局終了"
                     : board.phase === "claim"
-                    ? "鳴き・ロンの選択待ち"
+                    ? "選択待ち"
                     : board.phase === "player"
                     ? "手牌から捨てる牌を選択"
                     : "CPUが順番に打牌中..."}
@@ -889,7 +886,6 @@ export default function Home() {
                       key={playerName}
                       label={playerName}
                       tiles={board.discards[playerIndex] ?? []}
-                      melds={board.melds[playerIndex] ?? []}
                       isRiichi={board.riichi[playerIndex]}
                     />
                   ))}
@@ -975,7 +971,7 @@ export default function Home() {
             <div className="flex items-center gap-2">
               <h2 className="text-white font-black text-sm sm:text-base">あなたの手牌</h2>
               <span className="rounded bg-amber-500/20 px-2 py-0.5 text-xs font-bold text-white border border-amber-400/50">
-                {getShantenText(board.hands[0])}
+                {getShantenText(board.hands[0], board.melds[0])}
               </span>
             </div>
 
@@ -983,7 +979,7 @@ export default function Home() {
             <div className="flex items-center gap-1.5">
               {board.phase === "claim" && board.claimState && (
                 <>
-                  {board.claimState.canRon && (
+                  {board.claimState.canRon ? (
                     <button
                       type="button"
                       onClick={handleRon}
@@ -991,24 +987,27 @@ export default function Home() {
                     >
                       ロン
                     </button>
-                  )}
-                  {board.claimState.canPon && (
-                    <button
-                      type="button"
-                      onClick={handlePon}
-                      className="px-3 py-1 rounded bg-amber-500 text-xs font-black text-white hover:bg-amber-400 shadow"
-                    >
-                      ポン
-                    </button>
-                  )}
-                  {board.claimState.canChi && (
-                    <button
-                      type="button"
-                      onClick={handleChi}
-                      className="px-3 py-1 rounded bg-blue-600 text-xs font-black text-white hover:bg-blue-500 shadow"
-                    >
-                      チー
-                    </button>
+                  ) : (
+                    <>
+                      {board.claimState.canPon && (
+                        <button
+                          type="button"
+                          onClick={handlePon}
+                          className="px-3 py-1 rounded bg-amber-500 text-xs font-black text-white hover:bg-amber-400 shadow"
+                        >
+                          ポン
+                        </button>
+                      )}
+                      {board.claimState.canChi && (
+                        <button
+                          type="button"
+                          onClick={handleChi}
+                          className="px-3 py-1 rounded bg-blue-600 text-xs font-black text-white hover:bg-blue-500 shadow"
+                        >
+                          チー
+                        </button>
+                      )}
+                    </>
                   )}
                   <button
                     type="button"
@@ -1021,7 +1020,7 @@ export default function Home() {
               )}
 
               {board.phase === "player" &&
-                getShantenValue(board.hands[0]) === -1 &&
+                getShantenValue(board.hands[0], board.melds[0]) === -1 &&
                 !board.winner && (
                   <button
                     type="button"
@@ -1068,28 +1067,44 @@ export default function Home() {
             </div>
           </div>
 
-          {/* 手牌一覧 */}
-          <div className="flex w-full max-w-full flex-nowrap items-center justify-between gap-0.5 px-0.5 py-1 sm:gap-1.5 sm:px-1 md:justify-center overflow-x-hidden">
-            {board.hands[0].map((tile, index) => (
-              <TileCard
-                key={tile.id}
-                tile={tile}
-                onClick={() => discard(index)}
-                disabled={
-                  !isHost ||
-                  role !== "player" ||
-                  board.gameMode !== "PLAYING" ||
-                  board.phase !== "player" ||
-                  board.turn !== 0 ||
-                  board.winner !== null
-                }
-                className={`hand-tile ${
-                  board.hands[0].length % 3 === 2 && index === board.hands[0].length - 1
-                    ? "ml-1 sm:ml-3"
-                    : ""
-                }`}
-              />
-            ))}
+          {/* 手牌一覧 ＋ 右端に副露（鳴き牌） */}
+          <div className="flex w-full items-center justify-center gap-1 sm:gap-3 px-1 py-1 overflow-x-auto">
+            {/* 自分の純手牌 */}
+            <div className="flex items-center gap-0.5 sm:gap-1">
+              {board.hands[0].map((tile, index) => (
+                <TileCard
+                  key={tile.id}
+                  tile={tile}
+                  onClick={() => discard(index)}
+                  disabled={
+                    !isHost ||
+                    role !== "player" ||
+                    board.gameMode !== "PLAYING" ||
+                    board.phase !== "player" ||
+                    board.turn !== 0 ||
+                    board.winner !== null
+                  }
+                  className={`hand-tile ${
+                    board.hands[0].length % 3 === 2 && index === board.hands[0].length - 1
+                      ? "ml-1.5 sm:ml-3"
+                      : ""
+                  }`}
+                />
+              ))}
+            </div>
+
+            {/* 自分の鳴いた牌（右端に表示） */}
+            {board.melds[0].length > 0 && (
+              <div className="flex items-center gap-1 sm:gap-2 border-l border-emerald-700/80 pl-1.5 sm:pl-3">
+                {board.melds[0].map((meld, idx) => (
+                  <div key={idx} className="flex gap-0.5 bg-emerald-950/80 p-0.5 rounded border border-emerald-800">
+                    {meld.tiles.map((t) => (
+                      <TileCard key={t.id} tile={t} disabled className="!h-9 !w-6 sm:!h-11 sm:!w-8" />
+                    ))}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           <form onSubmit={sendChat} className="mt-2 flex gap-2 border-t border-emerald-800/80 pt-2 md:hidden">
