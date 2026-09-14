@@ -6,17 +6,40 @@ import { useCallback, useEffect, useRef, useState } from "react";
 type Suit = "man" | "pin" | "sou" | "honor";
 type Tile = { id: string; suit: Suit; value: number; label: string };
 type Role = "player" | "coach";
+type MeldType = "chi" | "pon" | "daiminkan" | "ankan";
+
+type Meld = {
+  type: MeldType;
+  tiles: Tile[];
+  fromPlayer?: number;
+};
+
+type ClaimState = {
+  tile: Tile;
+  fromPlayer: number;
+  canRon: boolean;
+  canPon: boolean;
+  canKan: boolean;
+  canChi: boolean;
+} | null;
+
 type BoardState = {
   hands: Tile[][];
   discards: Tile[][];
+  melds: Meld[][];
+  riichi: boolean[];
   wall: Tile[];
   doraIndicator: Tile;
   turn: number;
-  phase: "player" | "cpu";
+  phase: "player" | "cpu" | "claim";
   gameMode: "READY" | "PLAYING";
   hostId: string | null;
   lastAction: string;
+  isRiichiPending?: boolean;
+  claimState?: ClaimState;
+  winner?: { player: number; type: "ツモ" | "ロン"; tile: Tile } | null;
 };
+
 type ChatMessage = { id: string; role: Role; text: string; time: string };
 
 const ROOM = "mahjong-coaching-main";
@@ -49,53 +72,6 @@ function createDeck() {
     }
   });
   return deck.sort(() => Math.random() - 0.5);
-}
-
-function newBoard(hostId: string | null = null): BoardState {
-  const deck = createDeck();
-  const doraIndicator = deck.splice(Math.floor(Math.random() * deck.length), 1)[0];
-  const hands = [[], [], [], []] as Tile[][];
-  for (let round = 0; round < 13; round += 1) {
-    for (let index = 0; index < hands.length; index += 1) {
-      const tile = deck.pop();
-      if (tile) hands[index] = [...hands[index], tile];
-    }
-  }
-  const firstDraw = deck.pop();
-  if (firstDraw) hands[0] = [...hands[0], firstDraw];
-  hands[0] = sortHand(hands[0]);
-  return {
-    hands,
-    discards: [[], [], [], []],
-    wall: deck,
-    doraIndicator,
-    turn: 0,
-    phase: "player",
-    gameMode: hostId ? "PLAYING" : "READY",
-    hostId,
-    lastAction: "東家の配牌が完了しました",
-  };
-}
-
-function normalizeBoard(payload: Partial<BoardState>): BoardState {
-  const hands = Array.from({ length: 4 }, (_, index) =>
-    Array.isArray(payload.hands?.[index]) ? payload.hands[index] : []
-  );
-  const payloadDiscards = payload.discards ?? (payload as Partial<BoardState> & { rivers?: Tile[][] }).rivers;
-  const discards = Array.from({ length: 4 }, (_, index) =>
-    Array.isArray(payloadDiscards?.[index]) ? payloadDiscards[index] : []
-  );
-  return {
-    hands,
-    discards,
-    wall: Array.isArray(payload.wall) ? payload.wall : [],
-    doraIndicator: payload.doraIndicator ?? { id: "fallback-dora", suit: "honor", value: 5, label: "白" },
-    turn: typeof payload.turn === "number" ? payload.turn : 0,
-    phase: payload.phase === "cpu" ? "cpu" : "player",
-    gameMode: payload.gameMode === "PLAYING" ? "PLAYING" : "READY",
-    hostId: typeof payload.hostId === "string" ? payload.hostId : null,
-    lastAction: typeof payload.lastAction === "string" ? payload.lastAction : "盤面を同期しました",
-  };
 }
 
 function sortHand(hand: Tile[]) {
@@ -199,6 +175,41 @@ function getShantenText(hand: Tile[]): string {
   return `${minShanten}向聴`;
 }
 
+function getShantenValue(hand: Tile[]): number {
+  const text = getShantenText(hand);
+  if (text === "和了") return -1;
+  if (text === "聴牌") return 0;
+  const match = text.match(/(\d+)向聴/);
+  return match ? parseInt(match[1], 10) : 8;
+}
+
+function canRiichi(hand: Tile[], melds: Meld[] = []): boolean {
+  if (melds.length > 0 || hand.length !== 14) return false;
+  return hand.some((_, index) => {
+    const testHand = hand.filter((_, i) => i !== index);
+    return getShantenValue(testHand) === 0;
+  });
+}
+
+function canPon(hand: Tile[], tile: Tile): boolean {
+  return hand.filter((t) => t.suit === tile.suit && t.value === tile.value).length >= 2;
+}
+
+function canDaiminkan(hand: Tile[], tile: Tile): boolean {
+  return hand.filter((t) => t.suit === tile.suit && t.value === tile.value).length === 3;
+}
+
+function canChi(hand: Tile[], tile: Tile, fromPlayer: number, currentPlayer: number): boolean {
+  if ((currentPlayer + 3) % 4 !== fromPlayer || tile.suit === "honor") return false;
+  const vals = hand.filter((t) => t.suit === tile.suit).map((t) => t.value);
+  const v = tile.value;
+  return (
+    (vals.includes(v - 2) && vals.includes(v - 1)) ||
+    (vals.includes(v - 1) && vals.includes(v + 1)) ||
+    (vals.includes(v + 1) && vals.includes(v + 2))
+  );
+}
+
 function getBestDiscardIndex(hand: Tile[]) {
   const tileCount = (tile: Tile) =>
     hand.filter((candidate) => candidate.suit === tile.suit && candidate.value === tile.value).length;
@@ -225,6 +236,56 @@ function getBestDiscardIndex(hand: Tile[]) {
     (bestIndex, tile, index) => (discardScore(tile) > discardScore(hand[bestIndex]) ? index : bestIndex),
     0
   );
+}
+
+function newBoard(hostId: string | null = null): BoardState {
+  const deck = createDeck();
+  const doraIndicator = deck.splice(Math.floor(Math.random() * deck.length), 1)[0];
+  const hands = [[], [], [], []] as Tile[][];
+  for (let round = 0; round < 13; round += 1) {
+    for (let index = 0; index < hands.length; index += 1) {
+      const tile = deck.pop();
+      if (tile) hands[index] = [...hands[index], tile];
+    }
+  }
+  const firstDraw = deck.pop();
+  if (firstDraw) hands[0] = [...hands[0], firstDraw];
+  hands[0] = sortHand(hands[0]);
+  return {
+    hands,
+    discards: [[], [], [], []],
+    melds: [[], [], [], []],
+    riichi: [false, false, false, false],
+    wall: deck,
+    doraIndicator,
+    turn: 0,
+    phase: "player",
+    gameMode: hostId ? "PLAYING" : "READY",
+    hostId,
+    lastAction: "東家の配牌が完了しました",
+    isRiichiPending: false,
+    claimState: null,
+    winner: null,
+  };
+}
+
+function normalizeBoard(payload: Partial<BoardState>): BoardState {
+  return {
+    hands: Array.from({ length: 4 }, (_, i) => payload.hands?.[i] ?? []),
+    discards: Array.from({ length: 4 }, (_, i) => payload.discards?.[i] ?? []),
+    melds: Array.from({ length: 4 }, (_, i) => payload.melds?.[i] ?? []),
+    riichi: payload.riichi ?? [false, false, false, false],
+    wall: payload.wall ?? [],
+    doraIndicator: payload.doraIndicator ?? { id: "dora", suit: "honor", value: 5, label: "白" },
+    turn: payload.turn ?? 0,
+    phase: payload.phase ?? "player",
+    gameMode: payload.gameMode === "PLAYING" ? "PLAYING" : "READY",
+    hostId: payload.hostId ?? null,
+    lastAction: payload.lastAction ?? "同期しました",
+    isRiichiPending: payload.isRiichiPending ?? false,
+    claimState: payload.claimState ?? null,
+    winner: payload.winner ?? null,
+  };
 }
 
 function getTileImagePath(tile: Tile): string[] {
@@ -298,16 +359,44 @@ function TileCard({
   );
 }
 
-function RiverRow({ label, tiles }: { label: string; tiles: Tile[] }) {
+function RiverRow({
+  label,
+  tiles,
+  melds = [],
+  isRiichi,
+}: {
+  label: string;
+  tiles: Tile[];
+  melds?: Meld[];
+  isRiichi?: boolean;
+}) {
   return (
     <div className="river-row flex min-h-[46px] flex-row items-center gap-2 py-1">
-      <span className="flex h-7 w-12 shrink-0 items-center justify-center text-center text-xs font-bold text-white bg-emerald-950/80 rounded border border-emerald-700/60 shadow-inner">
-        {label}
-      </span>
+      <div className="flex flex-col items-center gap-0.5">
+        <span className="flex h-7 w-12 shrink-0 items-center justify-center text-center text-xs font-bold text-white bg-emerald-950/80 rounded border border-emerald-700/60 shadow-inner">
+          {label}
+        </span>
+        {isRiichi && (
+          <span className="text-[9px] bg-rose-600 font-bold px-1 rounded text-white shadow">
+            立直
+          </span>
+        )}
+      </div>
       <div className="river-tiles flex flex-1 flex-row flex-nowrap items-center min-h-[42px] overflow-x-auto gap-1">
         {tiles.map((tile) => (
           <TileCard key={tile.id} tile={tile} disabled className="!h-10 !w-7 !max-w-[28px]" />
         ))}
+        {melds.length > 0 && (
+          <div className="ml-2 flex items-center gap-1 border-l border-emerald-700/60 pl-2">
+            {melds.map((m, idx) => (
+              <div key={idx} className="flex gap-0.5 bg-emerald-950/60 p-0.5 rounded border border-emerald-800">
+                {m.tiles.map((t) => (
+                  <TileCard key={t.id} tile={t} disabled className="!h-8 !w-5 !max-w-[22px]" />
+                ))}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -377,80 +466,141 @@ export default function Home() {
     };
   }, [isMounted]);
 
-  useEffect(() => {
-    if (
-      !isHostRef.current ||
-      role !== "player" ||
-      board?.gameMode !== "PLAYING" ||
-      board?.phase !== "cpu"
-    ) {
-      return;
-    }
+  // CPU打牌および鳴きチェックロジック
+  const processCpuTurn = useCallback(() => {
+    if (!isHostRef.current || roleRef.current !== "player" || board?.gameMode !== "PLAYING") return;
+    if (board?.phase !== "cpu" || board?.winner) return;
 
     const currentTurn = board.turn;
     if (currentTurn < 1 || currentTurn > 3) return;
 
-    const timer = setTimeout(() => {
-      setBoard((current) => {
-        if (!current || current.phase !== "cpu" || current.turn !== currentTurn) return current;
+    const hands = board.hands.map((h) => [...h]);
+    const discards = board.discards.map((d) => [...d]);
+    const wall = board.wall.slice(1);
+    const drawnTile = board.wall[0];
 
-        const hands = current.hands.map((hand) => [...hand]);
-        const discards = Array.from({ length: 4 }, (_, index) => [...(current.discards?.[index] ?? [])]);
-        const wall = current.wall.slice(1);
-        const drawnTile = current.wall[0];
+    if (!drawnTile) {
+      const next = { ...board, lastAction: "流局しました" };
+      setBoard(next);
+      broadcast(next);
+      return;
+    }
 
-        if (drawnTile) {
-          hands[currentTurn] = [...(hands[currentTurn] ?? []), drawnTile];
-        }
+    hands[currentTurn] = [...hands[currentTurn], drawnTile];
 
-        const discardIndex = hands[currentTurn].length > 0 ? getBestDiscardIndex(hands[currentTurn]) : -1;
-        const discarded = discardIndex >= 0 ? hands[currentTurn][discardIndex] : undefined;
+    // ツモ和了チェック
+    if (getShantenValue(hands[currentTurn]) === -1) {
+      const next: BoardState = {
+        ...board,
+        hands,
+        wall,
+        winner: { player: currentTurn, type: "ツモ", tile: drawnTile },
+        lastAction: `${PLAYER_NAMES[currentTurn]}がツモ和了！`,
+      };
+      setBoard(next);
+      broadcast(next);
+      return;
+    }
 
-        if (discarded) {
-          hands[currentTurn] = sortHand([
-            ...hands[currentTurn].slice(0, discardIndex),
-            ...hands[currentTurn].slice(discardIndex + 1),
-          ]);
-          discards[currentTurn] = [...(discards[currentTurn] ?? []), discarded];
-        }
+    const discardIndex = getBestDiscardIndex(hands[currentTurn]);
+    const discarded = hands[currentTurn][discardIndex];
 
-        const nextTurn = currentTurn + 1;
+    if (discarded) {
+      hands[currentTurn] = sortHand([
+        ...hands[currentTurn].slice(0, discardIndex),
+        ...hands[currentTurn].slice(discardIndex + 1),
+      ]);
+      discards[currentTurn] = [...discards[currentTurn], discarded];
+    }
 
-        if (nextTurn <= 3) {
-          const next = {
-            ...current,
-            hands,
-            discards,
-            wall,
-            turn: nextTurn,
-            lastAction: `${PLAYER_NAMES[currentTurn]}が打牌`,
-          };
-          broadcast(next);
-          return next;
-        } else {
-          const playerDraw = wall[0];
-          const nextWall = wall.slice(1);
-          if (playerDraw) {
-            hands[0] = [...hands[0], playerDraw];
-          }
+    // プレイヤーへの割り込み（ロン・ポン・チー・カン）判定
+    const playerHand = hands[0];
+    const canRonResult = getShantenValue([...playerHand, discarded]) === -1;
+    const canPonResult = canPon(playerHand, discarded);
+    const canKanResult = canDaiminkan(playerHand, discarded);
+    const canChiResult = canChi(playerHand, discarded, currentTurn, 0);
 
-          const next = {
-            ...current,
-            hands,
-            discards,
-            wall: nextWall,
-            phase: "player" as const,
-            turn: 0,
-            lastAction: "あなたのツモ番です",
-          };
-          broadcast(next);
-          return next;
-        }
-      });
-    }, 350);
+    if (canRonResult || canPonResult || canKanResult || canChiResult) {
+      const next: BoardState = {
+        ...board,
+        hands,
+        discards,
+        wall,
+        phase: "claim",
+        claimState: {
+          tile: discarded,
+          fromPlayer: currentTurn,
+          canRon: canRonResult,
+          canPon: canPonResult,
+          canKan: canKanResult,
+          canChi: canChiResult,
+        },
+        lastAction: `${PLAYER_NAMES[currentTurn]}が${discarded.label}を打牌 (鳴き・ロン可能)`,
+      };
+      setBoard(next);
+      broadcast(next);
+      return;
+    }
 
-    return () => clearTimeout(timer);
-  }, [board?.gameMode, board?.phase, board?.turn, broadcast, role]);
+    // 次のターンへ進行
+    const nextTurn = currentTurn + 1;
+    if (nextTurn <= 3) {
+      const next: BoardState = {
+        ...board,
+        hands,
+        discards,
+        wall,
+        turn: nextTurn,
+        lastAction: `${PLAYER_NAMES[currentTurn]}が${discarded.label}を打牌`,
+      };
+      setBoard(next);
+      broadcast(next);
+    } else {
+      const playerDraw = wall[0];
+      const nextWall = wall.slice(1);
+      if (playerDraw) {
+        hands[0] = [...hands[0], playerDraw];
+      }
+
+      const next: BoardState = {
+        ...board,
+        hands,
+        discards,
+        wall: nextWall,
+        phase: "player",
+        turn: 0,
+        lastAction: "あなたのツモ番です",
+      };
+      setBoard(next);
+      broadcast(next);
+    }
+  }, [board, broadcast]);
+
+  useEffect(() => {
+    if (board?.phase === "cpu") {
+      const timer = setTimeout(processCpuTurn, 400);
+      return () => clearTimeout(timer);
+    }
+  }, [board?.phase, board?.turn, processCpuTurn]);
+
+  // リーチ時の自動ツモ切り
+  useEffect(() => {
+    if (
+      board?.phase === "player" &&
+      board.turn === 0 &&
+      board.riichi[0] &&
+      !board.winner &&
+      board.gameMode === "PLAYING"
+    ) {
+      const currentHand = board.hands[0];
+      if (getShantenValue(currentHand) !== -1) {
+        const timer = setTimeout(() => {
+          discard(currentHand.length - 1);
+        }, 700);
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [board?.phase, board?.turn, board?.riichi]);
 
   const discard = (index: number) => {
     if (
@@ -463,25 +613,168 @@ export default function Home() {
     )
       return;
 
-    setBoard((current) => {
-      if (!current) return current;
-      const hands = current.hands.map((hand) => [...hand]);
-      const discards = Array.from({ length: 4 }, (_, playerIndex) => [...(current.discards?.[playerIndex] ?? [])]);
-      const discarded = hands[0].splice(index, 1)[0];
-      if (!discarded) return current;
-      hands[0] = sortHand(hands[0]);
-      discards[0] = [...(discards[0] ?? []), discarded];
-      const next = {
-        ...current,
-        hands,
-        discards,
-        turn: 1,
-        phase: "cpu" as const,
-        lastAction: `あなたが${discarded.label}を打牌`,
+    const hands = board.hands.map((h) => [...h]);
+    const discards = board.discards.map((d) => [...d]);
+    const discarded = hands[0].splice(index, 1)[0];
+    if (!discarded) return;
+
+    hands[0] = sortHand(hands[0]);
+    discards[0] = [...discards[0], discarded];
+
+    const riichi = [...board.riichi];
+    if (board.isRiichiPending) {
+      riichi[0] = true;
+    }
+
+    const next: BoardState = {
+      ...board,
+      hands,
+      discards,
+      riichi,
+      isRiichiPending: false,
+      turn: 1,
+      phase: "cpu",
+      lastAction: board.isRiichiPending
+        ? `あなたがリーチ！(${discarded.label}を打牌)`
+        : `あなたが${discarded.label}を打牌`,
+    };
+    setBoard(next);
+    broadcast(next);
+  };
+
+  // 鳴き・ロンのアクションハンドラ
+  const handlePass = () => {
+    if (!board || !board.claimState) return;
+    const nextTurn = board.claimState.fromPlayer + 1;
+
+    const hands = board.hands.map((h) => [...h]);
+    const wall = board.wall.slice(1);
+
+    if (nextTurn <= 3) {
+      const next: BoardState = {
+        ...board,
+        phase: "cpu",
+        turn: nextTurn,
+        claimState: null,
+        lastAction: "スルーしました",
       };
+      setBoard(next);
       broadcast(next);
-      return next;
+    } else {
+      const playerDraw = wall[0];
+      if (playerDraw) {
+        hands[0] = [...hands[0], playerDraw];
+      }
+      const next: BoardState = {
+        ...board,
+        hands,
+        wall,
+        phase: "player",
+        turn: 0,
+        claimState: null,
+        lastAction: "スルーしました。あなたのツモ番です",
+      };
+      setBoard(next);
+      broadcast(next);
+    }
+  };
+
+  const handleRon = () => {
+    if (!board || !board.claimState) return;
+    const next: BoardState = {
+      ...board,
+      winner: { player: 0, type: "ロン", tile: board.claimState.tile },
+      claimState: null,
+      lastAction: "ロン和了！おめでとうございます！",
+    };
+    setBoard(next);
+    broadcast(next);
+  };
+
+  const handleTsumo = () => {
+    if (!board) return;
+    const next: BoardState = {
+      ...board,
+      winner: { player: 0, type: "ツモ", tile: board.hands[0][board.hands[0].length - 1] },
+      lastAction: "ツモ和了！おめでとうございます！",
+    };
+    setBoard(next);
+    broadcast(next);
+  };
+
+  const handlePon = () => {
+    if (!board || !board.claimState) return;
+    const targetTile = board.claimState.tile;
+    const hand = [...board.hands[0]];
+
+    let removed = 0;
+    const newHand = hand.filter((t) => {
+      if (removed < 2 && t.suit === targetTile.suit && t.value === targetTile.value) {
+        removed++;
+        return false;
+      }
+      return true;
     });
+
+    const melds = board.melds.map((m) => [...m]);
+    melds[0].push({
+      type: "pon",
+      tiles: [targetTile, targetTile, targetTile],
+      fromPlayer: board.claimState.fromPlayer,
+    });
+
+    const next: BoardState = {
+      ...board,
+      hands: board.hands.map((h, i) => (i === 0 ? newHand : h)),
+      melds,
+      turn: 0,
+      phase: "player",
+      claimState: null,
+      lastAction: `ポンして${targetTile.label}を鳴きました`,
+    };
+    setBoard(next);
+    broadcast(next);
+  };
+
+  const handleChi = () => {
+    if (!board || !board.claimState) return;
+    const targetTile = board.claimState.tile;
+    const hand = [...board.hands[0]];
+    const v = targetTile.value;
+
+    // 鳴く候補の2枚を探す（簡易実装：連続する2枚を取り出す）
+    let c1 = hand.find((t) => t.suit === targetTile.suit && t.value === v - 2);
+    let c2 = hand.find((t) => t.suit === targetTile.suit && t.value === v - 1);
+    if (!c1 || !c2) {
+      c1 = hand.find((t) => t.suit === targetTile.suit && t.value === v - 1);
+      c2 = hand.find((t) => t.suit === targetTile.suit && t.value === v + 1);
+    }
+    if (!c1 || !c2) {
+      c1 = hand.find((t) => t.suit === targetTile.suit && t.value === v + 1);
+      c2 = hand.find((t) => t.suit === targetTile.suit && t.value === v + 2);
+    }
+
+    if (!c1 || !c2) return;
+
+    const newHand = hand.filter((t) => t.id !== c1.id && t.id !== c2.id);
+    const melds = board.melds.map((m) => [...m]);
+    melds[0].push({
+      type: "chi",
+      tiles: sortHand([targetTile, c1, c2]),
+      fromPlayer: board.claimState.fromPlayer,
+    });
+
+    const next: BoardState = {
+      ...board,
+      hands: board.hands.map((h, i) => (i === 0 ? newHand : h)),
+      melds,
+      turn: 0,
+      phase: "player",
+      claimState: null,
+      lastAction: `チーして${targetTile.label}を鳴きました`,
+    };
+    setBoard(next);
+    broadcast(next);
   };
 
   const reset = () => {
@@ -539,8 +832,10 @@ export default function Home() {
               <div>
                 <p className="text-sm font-bold text-white">{board.lastAction}</p>
                 <p className="text-xs text-emerald-100 font-medium">
-                  {board.gameMode === "READY"
-                    ? "対局開始を押してホストになります"
+                  {board.winner
+                    ? "対局終了"
+                    : board.phase === "claim"
+                    ? "鳴き・ロンの選択待ち"
                     : board.phase === "player"
                     ? "手牌から捨てる牌を選択"
                     : "CPUが順番に打牌中..."}
@@ -590,7 +885,13 @@ export default function Home() {
                 </div>
                 <div className="divide-y divide-emerald-800/40">
                   {PLAYER_NAMES.map((playerName, playerIndex) => (
-                    <RiverRow key={playerName} label={playerName} tiles={board.discards[playerIndex] ?? []} />
+                    <RiverRow
+                      key={playerName}
+                      label={playerName}
+                      tiles={board.discards[playerIndex] ?? []}
+                      melds={board.melds[playerIndex] ?? []}
+                      isRiichi={board.riichi[playerIndex]}
+                    />
                   ))}
                 </div>
               </div>
@@ -667,7 +968,9 @@ export default function Home() {
           </aside>
         </div>
 
+        {/* 手牌＆アクションボタンエリア */}
         <div className="fixed inset-x-0 bottom-0 z-50 w-full max-w-full overflow-hidden rounded-none border-x-0 border-t border-emerald-700/80 bg-emerald-900/95 p-1.5 sm:p-3 shadow-2xl backdrop-blur-md md:static md:z-10 md:rounded-lg md:border">
+          {/* アクションボタンバー */}
           <div className="flex items-center justify-between mb-1.5 sm:mb-2">
             <div className="flex items-center gap-2">
               <h2 className="text-white font-black text-sm sm:text-base">あなたの手牌</h2>
@@ -675,16 +978,97 @@ export default function Home() {
                 {getShantenText(board.hands[0])}
               </span>
             </div>
-            <span
-              className={`px-2.5 py-1 rounded text-xs font-bold shadow ${
-                board.phase === "player" && role === "player"
-                  ? "bg-amber-500 text-white animate-pulse"
-                  : "bg-emerald-950 text-emerald-100"
-              }`}
-            >
-              {role === "coach" ? "観戦中" : board.phase === "player" ? "あなたの番" : "CPU進行"}
-            </span>
+
+            {/* ロン・ツモ・鳴き・リーチ ボタン表示エリア */}
+            <div className="flex items-center gap-1.5">
+              {board.phase === "claim" && board.claimState && (
+                <>
+                  {board.claimState.canRon && (
+                    <button
+                      type="button"
+                      onClick={handleRon}
+                      className="px-3 py-1 rounded bg-rose-600 text-xs font-black text-white hover:bg-rose-500 shadow animate-bounce"
+                    >
+                      ロン
+                    </button>
+                  )}
+                  {board.claimState.canPon && (
+                    <button
+                      type="button"
+                      onClick={handlePon}
+                      className="px-3 py-1 rounded bg-amber-500 text-xs font-black text-white hover:bg-amber-400 shadow"
+                    >
+                      ポン
+                    </button>
+                  )}
+                  {board.claimState.canChi && (
+                    <button
+                      type="button"
+                      onClick={handleChi}
+                      className="px-3 py-1 rounded bg-blue-600 text-xs font-black text-white hover:bg-blue-500 shadow"
+                    >
+                      チー
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={handlePass}
+                    className="px-3 py-1 rounded bg-slate-600 text-xs font-bold text-white hover:bg-slate-500 shadow"
+                  >
+                    パス
+                  </button>
+                </>
+              )}
+
+              {board.phase === "player" &&
+                getShantenValue(board.hands[0]) === -1 &&
+                !board.winner && (
+                  <button
+                    type="button"
+                    onClick={handleTsumo}
+                    className="px-3 py-1 rounded bg-rose-600 text-xs font-black text-white hover:bg-rose-500 shadow animate-bounce"
+                  >
+                    ツモ
+                  </button>
+                )}
+
+              {board.phase === "player" &&
+                !board.riichi[0] &&
+                canRiichi(board.hands[0], board.melds[0]) && (
+                  <button
+                    type="button"
+                    onClick={() => setBoard((prev) => (prev ? { ...prev, isRiichiPending: true } : prev))}
+                    className={`px-3 py-1 rounded text-xs font-black shadow transition-all ${
+                      board.isRiichiPending
+                        ? "bg-rose-500 text-white animate-pulse"
+                        : "bg-amber-500 text-white hover:bg-amber-400"
+                    }`}
+                  >
+                    {board.isRiichiPending ? "切る牌を選択" : "リーチ"}
+                  </button>
+                )}
+
+              <span
+                className={`px-2.5 py-1 rounded text-xs font-bold shadow ${
+                  board.winner
+                    ? "bg-rose-600 text-white"
+                    : board.phase === "player" && role === "player"
+                    ? "bg-amber-500 text-white animate-pulse"
+                    : "bg-emerald-950 text-emerald-100"
+                }`}
+              >
+                {board.winner
+                  ? `${PLAYER_NAMES[board.winner.player]}の${board.winner.type}`
+                  : role === "coach"
+                  ? "観戦中"
+                  : board.phase === "player"
+                  ? "あなたの番"
+                  : "待機中"}
+              </span>
+            </div>
           </div>
+
+          {/* 手牌一覧 */}
           <div className="flex w-full max-w-full flex-nowrap items-center justify-between gap-0.5 px-0.5 py-1 sm:gap-1.5 sm:px-1 md:justify-center overflow-x-hidden">
             {board.hands[0].map((tile, index) => (
               <TileCard
@@ -696,12 +1080,18 @@ export default function Home() {
                   role !== "player" ||
                   board.gameMode !== "PLAYING" ||
                   board.phase !== "player" ||
-                  board.turn !== 0
+                  board.turn !== 0 ||
+                  board.winner !== null
                 }
-                className={`hand-tile ${board.hands[0].length === 14 && index === 13 ? "ml-1 sm:ml-3" : ""}`}
+                className={`hand-tile ${
+                  board.hands[0].length % 3 === 2 && index === board.hands[0].length - 1
+                    ? "ml-1 sm:ml-3"
+                    : ""
+                }`}
               />
             ))}
           </div>
+
           <form onSubmit={sendChat} className="mt-2 flex gap-2 border-t border-emerald-800/80 pt-2 md:hidden">
             <input
               value={chatText}
