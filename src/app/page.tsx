@@ -98,7 +98,6 @@ function getShantenText(hand: Tile[], melds: Meld[] = []): string {
   let chiitoiShanten = 99;
   let kokushiShanten = 99;
 
-  // 門前（鳴いていない）時のみ七対子・国士無双を判定
   if (meldCount === 0) {
     const kokushiIndices = [0, 8, 9, 17, 18, 26, 27, 28, 29, 30, 31, 32, 33];
     let kokushiKinds = 0;
@@ -368,6 +367,7 @@ function TileCard({
   );
 }
 
+// 改修: 河の行を折り返し（flex-wrap）可能にし、牌サイズをコンパクト化
 function RiverRow({
   label,
   tiles,
@@ -378,20 +378,25 @@ function RiverRow({
   isRiichi?: boolean;
 }) {
   return (
-    <div className="river-row flex min-h-[46px] flex-row items-center gap-2 py-1">
-      <div className="flex flex-col items-center gap-0.5">
-        <span className="flex h-7 w-12 shrink-0 items-center justify-center text-center text-xs font-bold text-white bg-emerald-950/80 rounded border border-emerald-700/60 shadow-inner">
+    <div className="river-row flex items-start gap-1.5 sm:gap-2 py-1.5 border-b border-emerald-800/40 last:border-b-0">
+      <div className="flex flex-col items-center gap-0.5 pt-0.5">
+        <span className="flex h-6 w-10 sm:h-7 sm:w-12 shrink-0 items-center justify-center text-center text-[11px] sm:text-xs font-bold text-white bg-emerald-950/80 rounded border border-emerald-700/60 shadow-inner">
           {label}
         </span>
         {isRiichi && (
-          <span className="text-[9px] bg-rose-600 font-bold px-1 rounded text-white shadow">
+          <span className="text-[8px] sm:text-[9px] bg-rose-600 font-bold px-1 rounded text-white shadow">
             立直
           </span>
         )}
       </div>
-      <div className="river-tiles flex flex-1 flex-row flex-nowrap items-center min-h-[42px] overflow-x-auto gap-1">
+      <div className="river-tiles flex flex-1 flex-wrap items-center gap-1 sm:gap-1.5 min-h-[28px] pt-0.5">
         {tiles.map((tile) => (
-          <TileCard key={tile.id} tile={tile} disabled className="!h-10 !w-7 !max-w-[28px]" />
+          <TileCard
+            key={tile.id}
+            tile={tile}
+            disabled
+            className="!h-7 !w-[20px] max-w-none sm:!h-9 sm:!w-[26px] !rounded-sm !p-0"
+          />
         ))}
       </div>
     </div>
@@ -875,12 +880,12 @@ export default function Home() {
               </div>
             </div>
 
-            <div className="bg-emerald-900/80 border border-emerald-700/80 rounded-lg p-4 shadow-xl backdrop-blur-sm">
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
+            <div className="bg-emerald-900/80 border border-emerald-700/80 rounded-lg p-3 sm:p-4 shadow-xl backdrop-blur-sm">
+              <div className="space-y-1">
+                <div className="flex items-center justify-between mb-1">
                   <h2 className="text-white font-black text-base tracking-wide">河</h2>
                 </div>
-                <div className="divide-y divide-emerald-800/40">
+                <div>
                   {PLAYER_NAMES.map((playerName, playerIndex) => (
                     <RiverRow
                       key={playerName}
@@ -891,7 +896,7 @@ export default function Home() {
                   ))}
                 </div>
               </div>
-              <div className="mt-4 flex items-center gap-3 border-t border-emerald-800/80 pt-3 text-xs font-bold text-white">
+              <div className="mt-3 flex items-center gap-3 border-t border-emerald-800/80 pt-3 text-xs font-bold text-white">
                 <span>山</span>
                 <div className="h-2 flex-1 rounded-full bg-emerald-950">
                   <div
@@ -900,7 +905,7 @@ export default function Home() {
                   />
                 </div>
                 <span className="ml-2 whitespace-nowrap">ドラ</span>
-                <TileCard tile={board.doraIndicator} disabled className="!h-10 !w-7 !max-w-[28px]" />
+                <TileCard tile={board.doraIndicator} disabled className="!h-8 !w-6 sm:!h-10 sm:!w-7" />
               </div>
             </div>
           </section>
