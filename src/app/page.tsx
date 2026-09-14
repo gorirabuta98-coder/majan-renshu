@@ -40,7 +40,7 @@ type BoardState = {
   winner?: { player: number; type: "ツモ" | "ロン"; tile: Tile } | null;
 };
 
-type ChatMessage = { id: string; role: Role; text: string; time: string };
+type ChatMessage = { id: string; role: Role; userName: string; text: string; time: string };
 
 const ROOM = "mahjong-coaching-main";
 const PLAYER_NAMES = ["自分", "下家", "対面", "上家"];
@@ -367,7 +367,7 @@ function TileCard({
   );
 }
 
-// 改修: 河の行を折り返し（flex-wrap）可能にし、牌サイズをコンパクト化
+// 河（1行6枚固定：6列グリッドで確実に自動改行）
 function RiverRow({
   label,
   tiles,
@@ -379,7 +379,7 @@ function RiverRow({
 }) {
   return (
     <div className="river-row flex items-start gap-1.5 sm:gap-2 py-1.5 border-b border-emerald-800/40 last:border-b-0">
-      <div className="flex flex-col items-center gap-0.5 pt-0.5">
+      <div className="flex flex-col items-center gap-0.5 pt-0.5 w-10 sm:w-12 shrink-0">
         <span className="flex h-6 w-10 sm:h-7 sm:w-12 shrink-0 items-center justify-center text-center text-[11px] sm:text-xs font-bold text-white bg-emerald-950/80 rounded border border-emerald-700/60 shadow-inner">
           {label}
         </span>
@@ -389,13 +389,13 @@ function RiverRow({
           </span>
         )}
       </div>
-      <div className="river-tiles flex flex-1 flex-wrap items-center gap-1 sm:gap-1.5 min-h-[28px] pt-0.5">
+      <div className="river-tiles grid grid-cols-6 gap-0.5 sm:gap-1 items-center min-h-[28px] pt-0.5">
         {tiles.map((tile) => (
           <TileCard
             key={tile.id}
             tile={tile}
             disabled
-            className="!h-7 !w-[20px] max-w-none sm:!h-9 sm:!w-[26px] !rounded-sm !p-0"
+            className="!h-7 !w-[22px] max-w-none sm:!h-9 sm:!w-[28px] !rounded-sm !p-0"
           />
         ))}
       </div>
@@ -410,7 +410,9 @@ function formatTime() {
 export default function Home() {
   const [isMounted, setIsMounted] = useState(false);
   const [board, setBoard] = useState<BoardState | null>(null);
+  const [history, setHistory] = useState<BoardState[]>([]); // アクションUndo（待った）履歴
   const [role, setRole] = useState<Role>("player");
+  const [userName, setUserName] = useState("プレイヤー"); // チャットの送信者名設定
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [chatText, setChatText] = useState("");
   const [isChatOpen, setIsChatOpen] = useState(false);
@@ -467,7 +469,16 @@ export default function Home() {
     };
   }, [isMounted]);
 
-  // CPU打牌および鳴き・ロンチェック
+  // アクションを1手戻す（Undo機能）
+  const handleUndo = () => {
+    if (history.length === 0) return;
+    const previousState = history[history.length - 1];
+    setHistory((prev) => prev.slice(0, -1));
+    setBoard(previousState);
+    broadcast(previousState);
+  };
+
+  // CPU打牌処理
   const processCpuTurn = useCallback(() => {
     if (!isHostRef.current || roleRef.current !== "player" || board?.gameMode !== "PLAYING") return;
     if (board?.phase !== "cpu" || board?.winner) return;
@@ -606,6 +617,7 @@ export default function Home() {
     }
   }, [board?.phase, board?.turn, board?.riichi]);
 
+  // 打牌アクション（Undo用に現在の盤面をスタックに保存）
   const discard = (index: number) => {
     if (
       !board ||
@@ -616,6 +628,9 @@ export default function Home() {
       board.turn !== 0
     )
       return;
+
+    // 現在の盤面を履歴に保存
+    setHistory((prev) => [...prev, board]);
 
     const hands = board.hands.map((h) => [...h]);
     const discards = board.discards.map((d) => [...d]);
@@ -648,8 +663,9 @@ export default function Home() {
 
   const handlePass = () => {
     if (!board || !board.claimState) return;
-    const nextTurn = board.claimState.fromPlayer + 1;
+    setHistory((prev) => [...prev, board]);
 
+    const nextTurn = board.claimState.fromPlayer + 1;
     const hands = board.hands.map((h) => [...h]);
     const wall = board.wall.slice(1);
 
@@ -684,6 +700,8 @@ export default function Home() {
 
   const handleRon = () => {
     if (!board || !board.claimState) return;
+    setHistory((prev) => [...prev, board]);
+
     const next: BoardState = {
       ...board,
       winner: { player: 0, type: "ロン", tile: board.claimState.tile },
@@ -696,6 +714,8 @@ export default function Home() {
 
   const handleTsumo = () => {
     if (!board) return;
+    setHistory((prev) => [...prev, board]);
+
     const next: BoardState = {
       ...board,
       winner: { player: 0, type: "ツモ", tile: board.hands[0][board.hands[0].length - 1] },
@@ -707,6 +727,8 @@ export default function Home() {
 
   const handlePon = () => {
     if (!board || !board.claimState) return;
+    setHistory((prev) => [...prev, board]);
+
     const targetTile = board.claimState.tile;
     const hand = [...board.hands[0]];
 
@@ -741,6 +763,8 @@ export default function Home() {
 
   const handleChi = () => {
     if (!board || !board.claimState) return;
+    setHistory((prev) => [...prev, board]);
+
     const targetTile = board.claimState.tile;
     const hand = [...board.hands[0]];
     const v = targetTile.value;
@@ -783,6 +807,7 @@ export default function Home() {
     if (supabase && board?.gameMode === "PLAYING" && !isHostRef.current) return;
     const next = newBoard(clientIdRef.current || "local-host");
     setIsHost(true);
+    setHistory([]);
     setBoard(next);
     broadcast(next);
   };
@@ -791,6 +816,7 @@ export default function Home() {
     isHostRef.current = true;
     setIsHost(true);
     const next = newBoard(clientIdRef.current || "local-host");
+    setHistory([]);
     setBoard(next);
     broadcast(next);
   };
@@ -799,7 +825,14 @@ export default function Home() {
     event.preventDefault();
     const text = chatText.trim();
     if (!text) return;
-    const message = { id: crypto.randomUUID(), role, text, time: formatTime() };
+    const displayName = userName.trim() || (role === "coach" ? "指導者" : "打者");
+    const message: ChatMessage = {
+      id: crypto.randomUUID(),
+      role,
+      userName: displayName,
+      text,
+      time: formatTime(),
+    };
     setMessages((current) => [...current.slice(-29), message]);
     void channelRef.current?.send({ type: "broadcast", event: "chat", payload: message });
     setChatText("");
@@ -862,6 +895,21 @@ export default function Home() {
                 >
                   指導者
                 </button>
+
+                {/* 1手戻す（Undo）ボタン */}
+                <button
+                  type="button"
+                  onClick={handleUndo}
+                  disabled={history.length === 0}
+                  className={`px-3 py-1.5 rounded text-xs font-bold text-white shadow border transition-all ${
+                    history.length > 0
+                      ? "bg-amber-500 hover:bg-amber-400 border-amber-300"
+                      : "bg-gray-700 opacity-50 cursor-not-allowed border-gray-600"
+                  }`}
+                >
+                  ↩ 1手戻す
+                </button>
+
                 <button
                   type="button"
                   onClick={reset}
@@ -910,25 +958,42 @@ export default function Home() {
             </div>
           </section>
 
-          <aside className="relative z-10 flex flex-col h-[180px] w-full shrink-0 rounded-lg border border-emerald-700/80 bg-emerald-900/80 p-3 shadow-xl backdrop-blur-sm md:sticky md:top-4 md:h-[430px] md:w-80">
-            <div className="flex items-center justify-between border-b border-emerald-800/80 pb-2">
-              <div>
-                <h2 className="text-white font-black text-base">指導チャット</h2>
-                <p className="text-xs text-emerald-100 font-medium">全端末にリアルタイム同期</p>
+          {/* 指導チャット（名前設定機能つき） */}
+          <aside className="relative z-10 flex flex-col h-[220px] w-full shrink-0 rounded-lg border border-emerald-700/80 bg-emerald-900/80 p-3 shadow-xl backdrop-blur-sm md:sticky md:top-4 md:h-[450px] md:w-80">
+            <div className="flex flex-col gap-2 border-b border-emerald-800/80 pb-2">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-white font-black text-base">指導チャット</h2>
+                  <p className="text-xs text-emerald-100 font-medium">全端末にリアルタイム同期</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsChatOpen(true)}
+                    className="text-xs bg-emerald-800 px-2 py-1 rounded text-white font-bold md:hidden"
+                  >
+                    履歴
+                  </button>
+                  <span className="rounded bg-rose-600 px-1.5 py-0.5 text-[10px] font-black text-white uppercase tracking-wider">
+                    LIVE
+                  </span>
+                </div>
               </div>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setIsChatOpen(true)}
-                  className="text-xs bg-emerald-800 px-2 py-1 rounded text-white font-bold md:hidden"
-                >
-                  履歴
-                </button>
-                <span className="rounded bg-rose-600 px-1.5 py-0.5 text-[10px] font-black text-white uppercase tracking-wider">
-                  LIVE
-                </span>
+
+              {/* チャット送信名設定欄 */}
+              <div className="flex items-center gap-2 pt-1">
+                <label className="text-[11px] font-bold text-emerald-200 shrink-0">表示名:</label>
+                <input
+                  type="text"
+                  value={userName}
+                  onChange={(e) => setUserName(e.target.value)}
+                  placeholder="名前を入力"
+                  maxLength={10}
+                  className="w-full rounded bg-emerald-950 px-2 py-1 text-xs text-white placeholder-emerald-100/50 border border-emerald-700 focus:outline-none focus:border-amber-400 font-bold"
+                />
               </div>
             </div>
+
             <div className="flex-1 flex flex-col gap-2 overflow-y-auto py-2">
               {messages.length === 0 ? (
                 <p className="m-auto text-center text-xs font-medium text-emerald-100">
@@ -943,7 +1008,7 @@ export default function Home() {
                     }`}
                   >
                     <div className="flex justify-between gap-2 text-[11px] font-bold text-emerald-200">
-                      <span>{message.role === "coach" ? "指導者" : "打者"}</span>
+                      <span>{message.userName || (message.role === "coach" ? "指導者" : "打者")}</span>
                       <time className="text-emerald-100">{message.time}</time>
                     </div>
                     <p className="mt-1 text-sm font-medium text-white">{message.text}</p>
@@ -980,7 +1045,7 @@ export default function Home() {
               </span>
             </div>
 
-            {/* ロン・ツモ・鳴き・リーチ ボタン表示エリア */}
+            {/* ロン・ツモ・鳴き・リーチ・Undo ボタン表示エリア */}
             <div className="flex items-center gap-1.5">
               {board.phase === "claim" && board.claimState && (
                 <>
@@ -1072,10 +1137,10 @@ export default function Home() {
             </div>
           </div>
 
-          {/* 手牌一覧 ＋ 右端に副露（鳴き牌） */}
-          <div className="flex w-full items-center justify-center gap-1 sm:gap-3 px-1 py-1 overflow-x-auto">
+          {/* 手牌一覧 ＋ 右端に副露（鳴き牌：超コンパクト表示） */}
+          <div className="flex w-full items-center justify-between gap-1 sm:gap-2 px-1 py-1 overflow-x-auto">
             {/* 自分の純手牌 */}
-            <div className="flex items-center gap-0.5 sm:gap-1">
+            <div className="flex items-center gap-0.5 sm:gap-1 shrink-0">
               {board.hands[0].map((tile, index) => (
                 <TileCard
                   key={tile.id}
@@ -1091,20 +1156,25 @@ export default function Home() {
                   }
                   className={`hand-tile ${
                     board.hands[0].length % 3 === 2 && index === board.hands[0].length - 1
-                      ? "ml-1.5 sm:ml-3"
+                      ? "ml-1 sm:ml-2"
                       : ""
                   }`}
                 />
               ))}
             </div>
 
-            {/* 自分の鳴いた牌（右端に表示） */}
+            {/* 自分の鳴いた牌（ポン・チー：超コンパクト表示） */}
             {board.melds[0].length > 0 && (
-              <div className="flex items-center gap-1 sm:gap-2 border-l border-emerald-700/80 pl-1.5 sm:pl-3">
+              <div className="flex items-center gap-1 sm:gap-1.5 border-l border-emerald-700/80 pl-1 sm:pl-2 shrink-0">
                 {board.melds[0].map((meld, idx) => (
-                  <div key={idx} className="flex gap-0.5 bg-emerald-950/80 p-0.5 rounded border border-emerald-800">
+                  <div key={idx} className="flex gap-0.5 bg-emerald-950/80 p-0.5 rounded border border-emerald-800/80">
                     {meld.tiles.map((t) => (
-                      <TileCard key={t.id} tile={t} disabled className="!h-9 !w-6 sm:!h-11 sm:!w-8" />
+                      <TileCard
+                        key={t.id}
+                        tile={t}
+                        disabled
+                        className="!h-6 !w-[16px] sm:!h-8 sm:!w-[22px] !rounded-none !p-0"
+                      />
                     ))}
                   </div>
                 ))}
@@ -1129,6 +1199,7 @@ export default function Home() {
           </form>
         </div>
 
+        {/* スマホ用チャットモーダル */}
         {isChatOpen && (
           <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/60 md:hidden backdrop-blur-sm">
             <div className="w-full max-h-[80vh] rounded-t-xl bg-emerald-900 p-4 border-t border-emerald-700">
@@ -1142,7 +1213,19 @@ export default function Home() {
                   閉じる
                 </button>
               </div>
-              <div className="mt-3 flex flex-col gap-2 overflow-y-auto max-h-[60vh]">
+
+              <div className="flex items-center gap-2 my-2">
+                <label className="text-xs font-bold text-emerald-200 shrink-0">表示名:</label>
+                <input
+                  type="text"
+                  value={userName}
+                  onChange={(e) => setUserName(e.target.value)}
+                  placeholder="名前を入力"
+                  className="w-full rounded bg-emerald-950 px-2 py-1 text-xs text-white border border-emerald-700"
+                />
+              </div>
+
+              <div className="mt-2 flex flex-col gap-2 overflow-y-auto max-h-[50vh]">
                 {messages.length === 0 ? (
                   <p className="py-8 text-center text-xs font-medium text-emerald-100">
                     まだメッセージはありません
@@ -1156,7 +1239,7 @@ export default function Home() {
                       }`}
                     >
                       <div className="flex justify-between gap-2 text-[11px] font-bold text-emerald-200">
-                        <span>{message.role === "coach" ? "指導者" : "打者"}</span>
+                        <span>{message.userName || (message.role === "coach" ? "指導者" : "打者")}</span>
                         <time className="text-emerald-100">{message.time}</time>
                       </div>
                       <p className="mt-1 text-sm font-medium text-white">{message.text}</p>
